@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuotaDeck</title>
+  <link rel="stylesheet" href="compact.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>QuotaDeck</h1>
+        <p id="syncMeta">正在读取本机数据…</p>
+      </div>
+      <button id="refreshBtn" class="icon-button" type="button" aria-label="刷新全部额度" title="刷新全部">↻</button>
+    </header>
+
+    <nav class="nav" aria-label="主导航">
+      <button type="button" data-view="quota" class="active">额度</button>
+      <button type="button" data-view="collab">协作</button>
+      <button type="button" data-view="models">模型库</button>
+    </nav>
+
+    <main>
+      <section id="quotaView" class="view active" aria-label="额度概览">
+        <div id="providerList" class="provider-list">
+          <div class="empty">正在连接本机 Agent…</div>
+        </div>
+      </section>
+
+      <section id="collabView" class="view" aria-label="多 Agent 协作">
+        <div class="section-heading">
+          <h2>并行分工</h2>
+          <p>三个 Agent 独立完成不同角色，结果并列交付。</p>
+        </div>
+        <label class="task-field">
+          <span>共同任务</span>
+          <textarea id="collabTask" rows="5" placeholder="例如：分析这个产品需求，分别给出实现、风险和交付方案"></textarea>
+        </label>
+        <div id="agentChoices" class="agent-choices"></div>
+        <button id="runCollabBtn" class="primary-button" type="button">开始并行协作</button>
+        <p class="cost-note">运行会实际消耗所选 Agent 的额度；默认使用只读／规划模式。</p>
+        <div id="collabResults" class="collab-results"></div>
+      </section>
+
+      <section id="modelsView" class="view" aria-label="本机模型库">
+        <div class="section-heading model-heading">
+          <div>
+            <h2>全部模型</h2>
+            <p id="modelCount">等待同步</p>
+          </div>
+          <input id="modelSearch" type="search" placeholder="搜索模型或能力" aria-label="搜索模型">
+        </div>
+        <div id="modelFilters" class="filters" aria-label="按 Agent 筛选"></div>
+        <div id="modelCatalog" class="model-catalog"></div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="compact.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "quota-deck",
+  "version": "0.3.1",
+  "license": "MIT",
+  "repository": "github:CHIWAWAFROMkk/quota-deck",
+  "private": true,
+  "description": "Truthful desktop quota monitor for AI agents and API providers",
+  "main": "src/main/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --test tests/*.test.mjs",
+    "package:portable": "pwsh -NoProfile -File scripts/package-portable.ps1"
+  },
+  "devDependencies": {
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12"
+  }
+}
