@@ -3,7 +3,18 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { findCodexBinary } = require('./codex-client.cjs');
 
-const { agyPath: AGY_PATH, nodePath, workbuddyScript: CODEBUDDY_SCRIPT } = require('./local-paths.cjs');
+const { agyPath: AGY_PATH, claudePath, nodePath, workbuddyScript: CODEBUDDY_SCRIPT } = require('./local-paths.cjs');
+const ownedChildren = new Set();
+
+function stopOwnedProcesses() {
+  for (const child of ownedChildren) child.kill();
+}
+
+function localAgentAvailability() {
+  let codex = false;
+  try { codex = fs.existsSync(findCodexBinary()); } catch {}
+  return { codex, antigravity: fs.existsSync(AGY_PATH), claude: fs.existsSync(claudePath), workbuddy: fs.existsSync(CODEBUDDY_SCRIPT) && fs.existsSync(nodePath) };
+}
 
 function findNodeBinary() {
   return nodePath;
@@ -19,16 +30,25 @@ function runProcess(binary, args, input, timeoutMs = 180_000) {
         ...process.env,
       },
     });
+    ownedChildren.add(child);
+    child.stdout.setEncoding('utf8');
     let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => child.kill(), timeoutMs);
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('exit', (code) => {
+    let bytes = 0;
+    let failure = null;
+    const timer = setTimeout(() => { failure = 'Agent 执行超时，请缩小任务后重试'; child.kill(); }, timeoutMs);
+    child.stdout.on('data', (chunk) => {
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > 4 * 1024 * 1024) { failure = 'Agent 输出超出限制'; child.kill(); }
+      else stdout += chunk;
+    });
+    child.stderr.on('data', () => {});
+    child.stdin.on('error', () => {});
+    child.on('error', () => { ownedChildren.delete(child); clearTimeout(timer); reject(new Error('无法启动 Agent，请检查本机 CLI 路径')); });
+    child.on('close', (code) => {
+      ownedChildren.delete(child);
       clearTimeout(timer);
-      if (code === 0) resolve(stdout.trim());
-      else reject(new Error((stderr || stdout || `进程退出 ${code}`).trim().slice(0, 500)));
+      if (code === 0 && !failure) resolve(stdout.trim());
+      else reject(new Error(failure || 'Agent 执行失败，请在对应 CLI 中检查登录与额度'));
     });
     if (input) child.stdin.end(input);
     else child.stdin.end();
@@ -100,16 +120,25 @@ async function runWorkBuddy(task, role) {
   return parseAgentOutput(output);
 }
 
+async function runClaude(task, role) {
+  const output = await runProcess(claudePath, ['--print', '--permission-mode', 'plan', '--tools', '', '--no-session-persistence', '--output-format', 'json'], rolePrompt(task, role));
+  return parseAgentOutput(output);
+}
+
 const runners = {
+  claude: (task) => runClaude(task, '独立审查、逻辑核验与风险识别'),
   codex: (task) => runCodex(task, '技术方案、实现路径与事实核查'),
   antigravity: (task) => runAntigravity(task, '发散方案、替代路径与边界条件'),
   workbuddy: (task) => runWorkBuddy(task, '用户视角、办公落地与交付结构'),
 };
 
-async function runCollaboration({ task, agents }) {
+async function runCollaboration(request) {
+  if (!request || typeof request.task !== 'string' || !Array.isArray(request.agents)) throw new Error('协作请求格式无效');
+  const { task, agents } = request;
   const cleanTask = String(task || '').trim();
   if (!cleanTask) throw new Error('请输入协作任务');
-  const selected = [...new Set((agents || []).filter((id) => runners[id]))];
+  if (cleanTask.length > 20000) throw new Error('任务过长，请限制在 20000 字符内');
+  const selected = [...new Set(agents.filter((id) => Object.hasOwn(runners, id)))];
   if (selected.length < 2) throw new Error('至少选择两个可调用 Agent');
   const settled = await Promise.allSettled(selected.map(async (id) => ({ id, output: await runners[id](cleanTask) })));
   return {
@@ -121,4 +150,4 @@ async function runCollaboration({ task, agents }) {
   };
 }
 
-module.exports = { parseAgentOutput, rolePrompt, runCollaboration };
+module.exports = { parseAgentOutput, rolePrompt, runCollaboration, localAgentAvailability, runProcess, stopOwnedProcesses };

@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>QuotaDeck</title>
   <link rel="stylesheet" href="compact.css">
@@ -9,12 +10,30 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div>
-        <h1>QuotaDeck</h1>
-        <p id="syncMeta">正在读取本机数据…</p>
+      <div class="brand">
+        <span class="hanko" aria-hidden="true">余</span>
+        <div>
+          <h1>QuotaDeck</h1>
+          <p id="syncMeta">正在读取本机数据…</p>
+        </div>
       </div>
-      <button id="refreshBtn" class="icon-button" type="button" aria-label="刷新全部额度" title="刷新全部">↻</button>
+      <div class="window-actions">
+        <button id="refreshBtn" class="icon-button" type="button" aria-label="刷新全部额度" title="刷新全部">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.7"/><path d="M13.2 2.6v2.9h-2.9"/></svg>
+        </button>
+        <button id="aboutBtn" class="icon-button" type="button" aria-label="软件与数据说明" title="软件与数据说明">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6"/><path d="M8 7.2v3.6"/><path d="M8 5.1v.1"/></svg>
+        </button>
+        <button id="hideBtn" class="icon-button" type="button" aria-label="隐藏到托盘" title="隐藏到托盘">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.8 8h8.4"/></svg>
+        </button>
+      </div>
     </header>
+
+    <section id="verdict" class="verdict" aria-live="polite">
+      <p class="verdict-main">正在核对各家额度…</p>
+      <p class="verdict-sub"></p>
+    </section>
 
     <nav class="nav" aria-label="主导航">
       <button type="button" data-view="quota" class="active">额度</button>
@@ -27,20 +46,25 @@
         <div id="providerList" class="provider-list">
           <div class="empty">正在连接本机 Agent…</div>
         </div>
+        <div class="legend" aria-label="额度条图例">
+          <span><i class="lg lg-live"></i>官方实时</span>
+          <span><i class="lg lg-stale"></i>旧快照</span>
+          <span><i class="lg lg-unknown"></i>未知，不等于 0%</span>
+        </div>
       </section>
 
       <section id="collabView" class="view" aria-label="多 Agent 协作">
         <div class="section-heading">
           <h2>并行分工</h2>
-          <p>三个 Agent 独立完成不同角色，结果并列交付。</p>
+          <p>选两个以上 Agent 同时处理一件事，各自负责不同角度。</p>
         </div>
         <label class="task-field">
           <span>共同任务</span>
-          <textarea id="collabTask" rows="5" placeholder="例如：分析这个产品需求，分别给出实现、风险和交付方案"></textarea>
+          <textarea id="collabTask" rows="5" maxlength="20000" placeholder="例如：分析这个产品需求，分别给出实现、风险和交付方案"></textarea>
         </label>
         <div id="agentChoices" class="agent-choices"></div>
         <button id="runCollabBtn" class="primary-button" type="button">开始并行协作</button>
-        <p class="cost-note">运行会实际消耗所选 Agent 的额度；默认使用只读／规划模式。</p>
+        <p class="cost-note">会实际消耗所选 Agent 的额度；默认只读，只做规划。</p>
         <div id="collabResults" class="collab-results"></div>
       </section>
 
@@ -52,12 +76,21 @@
           </div>
           <input id="modelSearch" type="search" placeholder="搜索模型或能力" aria-label="搜索模型">
         </div>
-        <div id="modelFilters" class="filters" aria-label="按 Agent 筛选"></div>
+        <div id="modelFilters" class="filters" aria-label="按服务商筛选"></div>
         <div id="modelCatalog" class="model-catalog"></div>
       </section>
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="aboutDialog" aria-labelledby="aboutTitle">
+    <h2 id="aboutTitle">软件与数据说明</h2>
+    <p id="appVersion">QuotaDeck</p>
+    <p>额度由各服务商提供。共享池不等于每个模型各有一份额度；服务商没给出的配比不会猜测。模型能力是本地建议，不是官方排名。</p>
+    <p>Claude：保留你现有的状态栏，需要接通数据转发后才显示额度。WorkBuddy：读取的是网页快照，不是实时连接。</p>
+    <p>点「−」隐藏窗口，点系统托盘图标可重新打开；在托盘菜单选「退出」结束软件。</p>
+    <p>协作会消耗所选 Agent 的额度，找到 CLI 不代表已登录。任务里不要写不必要的个人信息或密钥。</p>
+    <form method="dialog"><button class="primary-button">知道了</button></form>
+  </dialog>
   <script src="compact.js"></script>
 </body>
 </html>

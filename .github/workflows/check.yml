@@ -13,9 +13,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run check:desktop
       - name: Build portable app
         shell: pwsh
         run: ./scripts/package-portable.ps1 -OutputName QuotaDeck
+      - name: Verify delivered files using Windows PowerShell
+        shell: pwsh
+        run: powershell.exe -NoProfile -NonInteractive -File ./dist/QuotaDeck/verify-package.ps1
+      - name: Smoke test packaged application
+        shell: pwsh
+        run: |
+          $env:QD_TEST_APP_ROOT = Join-Path $PWD 'dist/QuotaDeck/resources/app'
+          npm run check:desktop
       - uses: actions/upload-artifact@v4
         with:
           name: QuotaDeck-windows-x64

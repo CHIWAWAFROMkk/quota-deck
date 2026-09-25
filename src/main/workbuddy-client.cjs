@@ -14,22 +14,25 @@ function bundledSnapshotPath() {
 }
 
 function finiteNumber(value) {
-  if (value === null || value === undefined || String(value).trim() === '') return null;
+  if (!['number', 'string'].includes(typeof value) || String(value).trim() === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
 function normalizeWorkBuddySnapshot(input, sourcePath = null) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('WorkBuddy 快照格式无效');
   const remainingCredits = finiteNumber(input.remainingCredits);
-  const totalCredits = finiteNumber(input.totalCredits);
-  const usedCredits = finiteNumber(input.usedCredits);
+  const total = finiteNumber(input.totalCredits);
+  const used = finiteNumber(input.usedCredits);
+  const totalCredits = total !== null && total >= 0 ? total : null;
+  const usedCredits = used !== null && used >= 0 ? used : null;
   const calculatedRemaining = remainingCredits ?? (
     totalCredits !== null && usedCredits !== null ? Math.max(0, totalCredits - usedCredits) : null
   );
   const remainingPercent = totalCredits > 0 && calculatedRemaining !== null
     ? Math.max(0, Math.min(100, calculatedRemaining / totalCredits * 100))
     : null;
-  const models = Array.isArray(input.models) ? input.models : [];
+  const models = Array.isArray(input.models) ? input.models.filter(model => model && typeof model.name === 'string' && model.name.trim()).slice(0, 1000) : [];
   const status = remainingPercent === null
     ? 'stale'
     : remainingPercent <= 10 ? 'critical' : remainingPercent <= 30 ? 'low' : 'healthy';
@@ -40,19 +43,19 @@ function normalizeWorkBuddySnapshot(input, sourcePath = null) {
     status,
     source: 'WorkBuddy 官方网页快照',
     precision: 'browser-snapshot',
-    updatedAt: input.capturedAt || null,
-    planType: input.plan || null,
+    updatedAt: typeof input.capturedAt === 'string' && Number.isFinite(Date.parse(input.capturedAt)) && Date.parse(input.capturedAt) <= Date.now() + 60000 ? new Date(input.capturedAt).toISOString() : null,
+    planType: typeof input.plan === 'string' ? input.plan.slice(0, 200) : null,
     remainingCredits: calculatedRemaining,
     totalCredits,
     usedCredits,
     remainingPercent,
     snapshotPath: sourcePath,
     models: models.map((model) => ({
-      name: String(model.name),
-      consumeMultiplier: finiteNumber(String(model.rateMultiplier || '').replace(/x$/i, '')),
+      name: model.name.trim().slice(0, 200),
+      consumeMultiplier: (() => { const raw = model.rateMultiplier; const value = finiteNumber(typeof raw === 'string' ? raw.replace(/x$/i, '') : raw); return value !== null && value >= 0 ? value : null; })(),
       pool: 'shared',
-      poolLabel: model.rateMultiplier
-        ? `共享 WorkBuddy 积分 · ${model.rateMultiplier}`
+      poolLabel: ['string', 'number'].includes(typeof model.rateMultiplier)
+        ? `共享 WorkBuddy 积分 · ${String(model.rateMultiplier).slice(0, 30)}`
         : '共享 WorkBuddy 积分',
       source: 'WorkBuddy 官方网页',
     })),
@@ -67,8 +70,10 @@ async function readWorkBuddySnapshot(options = {}) {
     : [defaultSnapshotPath(), bundledSnapshotPath()];
   for (const snapshotPath of candidates) {
     try {
+      if ((await fs.stat(snapshotPath)).size > 1048576) throw new Error('WorkBuddy 快照超出大小限制');
       const text = await fs.readFile(snapshotPath, 'utf8');
-      return normalizeWorkBuddySnapshot(JSON.parse(text), snapshotPath);
+      if (Buffer.byteLength(text) > 1048576) throw new Error('WorkBuddy 快照超出大小限制');
+      return normalizeWorkBuddySnapshot(JSON.parse(text.replace(/^\uFEFF/, '')), snapshotPath);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }

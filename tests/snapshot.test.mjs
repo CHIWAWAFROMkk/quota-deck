@@ -46,7 +46,7 @@ test('WorkBuddy keeps model rows tied to one shared credit pool', () => {
   });
   const provider = providerToUi(raw);
   assert.equal(provider.quotaHero, '3,000 积分');
-  assert.equal(provider.status, 'healthy');
+  assert.equal(provider.status, 'stale');
   assert.equal(provider.models[0].val, '3,000 积分共享');
   assert.equal(provider.models[1].pool, '共享 WorkBuddy 积分');
   assert.equal(provider.models[0].consumeMultiplier, null);
@@ -63,7 +63,7 @@ test('Antigravity maps models to truthful shared quota windows', () => {
         ],
       },
     ],
-  }, [{ id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' }]);
+  }, [{ id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High)' }], '2026-09-13T00:00:00Z');
   const provider = providerToUi(raw);
   assert.equal(provider.models[0].val, '每周 94.0% · 5 小时 75.0%');
   assert.equal(provider.models[0].pool, 'Gemini Models');

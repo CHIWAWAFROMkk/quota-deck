@@ -29,22 +29,30 @@ function findCodexBinary() {
 }
 
 class CodexRpcClient {
-  constructor() {
+  constructor({ spawnProcess = spawn, binary = findCodexBinary } = {}) {
     this.nextId = 1;
     this.pending = new Map();
     this.child = null;
+    this.spawnProcess = spawnProcess;
+    this.binary = binary;
+    this.failure = null;
   }
 
   async start() {
-    this.child = spawn(findCodexBinary(), ['app-server', '--stdio'], {
+    this.child = this.spawnProcess(this.binary(), ['app-server', '--stdio'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    this.child.once('exit', (code) => {
-      const error = new Error(`Codex 本机服务已退出 (${code ?? 'unknown'})`);
+    const fail = (error) => {
+      this.failure = error;
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
-    });
+    };
+    this.child.once('error', () => fail(new Error('Codex 本机服务无法启动')));
+    this.child.once('exit', (code) => fail(new Error(`Codex 本机服务已退出 (${code ?? 'unknown'})`)));
+    this.child.stdin.on('error', () => fail(new Error('Codex 本机服务连接中断')));
+    // Drain diagnostics so a full stderr pipe cannot stall RPC responses.
+    this.child.stderr.resume();
     readline.createInterface({ input: this.child.stdout }).on('line', (line) => {
       let message;
       try {
@@ -72,10 +80,13 @@ class CodexRpcClient {
   }
 
   notify(method, params) {
+    if (this.failure) throw this.failure;
     this.child.stdin.write(`${JSON.stringify(params === undefined ? { method } : { method, params })}\n`);
   }
 
   request(method, params, timeoutMs = 20_000) {
+    if (this.failure) return Promise.reject(this.failure);
+    if (!this.child || this.child.stdin.destroyed) return Promise.reject(new Error('Codex 本机服务未连接'));
     const id = this.nextId++;
     const message = params === undefined ? { method, id } : { method, id, params };
     return new Promise((resolve, reject) => {
@@ -93,7 +104,16 @@ class CodexRpcClient {
           reject(error);
         },
       });
-      this.child.stdin.write(`${JSON.stringify(message)}\n`);
+      try {
+        this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+          if (!error || !this.pending.has(id)) return;
+          this.pending.get(id).reject(new Error('Codex 本机服务写入失败'));
+          this.pending.delete(id);
+        });
+      } catch {
+        this.pending.get(id)?.reject(new Error('Codex 本机服务写入失败'));
+        this.pending.delete(id);
+      }
     });
   }
 
@@ -118,23 +138,39 @@ function windowView(window, label) {
     remainingPercent: remainingPercent(window),
     usedPercent: window.usedPercent,
     windowDurationMins: window.windowDurationMins,
-    resetsAt: window.resetsAt ? new Date(window.resetsAt * 1000).toISOString() : null,
+    resetsAt: Number.isFinite(window.resetsAt) && Number.isFinite(new Date(window.resetsAt * 1000).getTime())
+      ? new Date(window.resetsAt * 1000).toISOString() : null,
   };
 }
 
-async function readCodexSnapshot() {
-  const client = new CodexRpcClient();
+async function readModelPages(client) {
+  const models = new Map();
+  const cursors = new Set();
+  let cursor;
+  for (let page = 0; page < 100; page++) {
+    const result = await client.request('model/list', { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) });
+    for (const model of result.data || []) models.set(model.id || model.model, model);
+    if (!result.nextCursor) return { data: [...models.values()] };
+    if (cursors.has(result.nextCursor)) throw new Error('Codex 模型目录分页异常');
+    cursors.add(result.nextCursor);
+    cursor = result.nextCursor;
+  }
+  throw new Error('Codex 模型目录分页过多');
+}
+
+async function readCodexSnapshot(client = new CodexRpcClient()) {
   try {
     await client.start();
     const [account, limits, models] = await Promise.all([
       client.request('account/read', { refreshToken: false }),
       client.request('account/rateLimits/read'),
-      client.request('model/list', { limit: 100, includeHidden: false }),
+      readModelPages(client),
     ]);
     if (!account.account) throw new Error('Codex 尚未登录。');
 
-    const buckets = Object.values(limits.rateLimitsByLimitId || {});
-    const shared = buckets.find((bucket) => bucket.limitId === 'codex') || limits.rateLimits;
+    const buckets = Object.entries(limits.rateLimitsByLimitId || {}).filter(([, bucket]) => bucket && typeof bucket === 'object')
+      .map(([id, bucket]) => ({ ...bucket, limitId: bucket.limitId || id }));
+    const shared = buckets.find((bucket) => bucket.limitId === 'codex') || limits.rateLimits || {};
     const namedBuckets = buckets.filter((bucket) => bucket.limitName);
     const modelRows = (models.data || []).map((model) => {
       const ownBucket = namedBuckets.find((bucket) => {
@@ -152,7 +188,8 @@ async function readCodexSnapshot() {
         source: '本机读取',
       };
     });
-    const primaryRemaining = remainingPercent(shared.primary);
+    const remainingWindows = [remainingPercent(shared.primary), remainingPercent(shared.secondary)].filter(Number.isFinite);
+    const primaryRemaining = remainingWindows.length ? Math.min(...remainingWindows) : null;
     return {
       id: 'codex',
       name: 'Codex',
@@ -172,4 +209,4 @@ async function readCodexSnapshot() {
   }
 }
 
-module.exports = { findCodexBinary, readCodexSnapshot, remainingPercent };
+module.exports = { findCodexBinary, readCodexSnapshot, remainingPercent, readModelPages, CodexRpcClient };
