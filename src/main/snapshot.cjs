@@ -208,7 +208,7 @@ function providerToUi(provider) {
     monogram: { workbuddy: 'WB', antigravity: 'AG', deepseek: 'DS', claude: 'CC', codex: 'CX' }[provider.id] || String(provider.name || provider.id || '?').slice(0, 2).toUpperCase(),
     gauge: gaugeFor(provider, { percent, balance, stale, pools }),
     status: displayStatus,
-    statusText: statusText(displayStatus),
+    statusText: provider.id === 'claude' && provider.chainConnected && displayStatus === 'unsupported' ? '等待数据' : statusText(displayStatus),
     plan: stale ? `旧数据 · ${freshness}` : provider.status === 'error' ? '连接异常 · 请重试' : provider.id === 'claude' ? '官方 statusLine · 当前会话观测' : provider.id === 'codex'
       ? `${provider.planType || 'ChatGPT'} · 官方额度窗口`
       : provider.id === 'workbuddy' && provider.planType

@@ -185,7 +185,7 @@
     const notes = [
       ...critical.map((provider) => `${provider.name} ${provider.statusText}${provider.gauge?.kind === 'window' ? `，剩 ${provider.quotaHero}，${provider.gauge.windows?.[0] ? resetText(provider.gauge.windows[0]) : provider.quotaSub}` : ''}`),
       ...stale.map((provider) => `${provider.name} 是旧数据`),
-      pending.length ? `${pending.map((provider) => provider.name).join('、')} 待接入` : '',
+      ...pending.map((provider) => `${provider.name} ${provider.statusText}`),
     ].filter(Boolean);
     $('#verdict .verdict-main').innerHTML = main;
     $('#verdict .verdict-sub').textContent = notes.join('；');
