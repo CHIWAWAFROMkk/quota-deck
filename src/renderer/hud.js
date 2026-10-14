@@ -181,6 +181,7 @@
     openId = null;
     showRate = false;
     card.hidden = true;
+    if (!strip.matches(':hover')) strip.classList.remove('open');
     renderStrip();
     window.hud.card(false);
   }

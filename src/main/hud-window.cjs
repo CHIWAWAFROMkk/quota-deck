@@ -1,7 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { BrowserWindow, ipcMain, screen } = require('electron');
 const { isTrustedRenderer } = require('./security.cjs');
 const { STRIP, WINDOW_SIZE, layoutHud, normalizeHudSettings, pickDisplay, snapToEdge } = require('./hud-geometry.cjs');
 
@@ -26,7 +25,9 @@ function saveSettings(file, settings) {
   } catch { /* a lost position is not worth interrupting the HUD */ }
 }
 
-function createHud({ settingsPath, onRefresh, onOpenPanel }) {
+// `electron` is injectable so tests can drive the window logic with fakes.
+function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('electron') }) {
+  const { BrowserWindow, ipcMain, screen } = electron;
   let settings = loadSettings(settingsPath);
   let win = null;
   let layout = null;
@@ -61,6 +62,16 @@ function createHud({ settingsPath, onRefresh, onOpenPanel }) {
     layout = layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset });
     win.setBounds(layout.window, false);
     send('hud:layout', layoutMessage());
+  }
+
+  // A new renderer starts with no press, no open card and the pointer outside;
+  // put the window back to match before it loads, or a drag or card could outlive it.
+  function resetInteraction() {
+    if (drag) { clearInterval(drag.timer); drag = null; }
+    if (!alive()) return;
+    setIgnore(true);
+    win.setFocusable(false);
+    place();
   }
 
   function startDrag() {
@@ -119,6 +130,7 @@ function createHud({ settingsPath, onRefresh, onOpenPanel }) {
     });
     win.webContents.on('render-process-gone', (_event, details) => {
       if (details.reason === 'clean-exit') return;
+      if (win === created) resetInteraction();
       const now = Date.now();
       recoveries = recoveries.filter(time => now - time < 60000);
       if (recoveries.length >= 3) return;

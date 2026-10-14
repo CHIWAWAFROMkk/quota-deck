@@ -129,6 +129,8 @@ app.whenReady().then(async () => {
   assert.match(await hudEval('document.querySelector("#card .row-value").textContent'), /%\/h|采样中/);
   await hudEval('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
   assert.equal(await hudEval('document.querySelector("#card").hidden'), true);
+  await hudEval('new Promise(resolve => setTimeout(resolve, 300))');
+  assert.equal(await hudEval('document.querySelector("#strip").classList.contains("open")'), false, 'closing the card away from the strip returns to rings only');
   fs.writeFileSync(path.join(output, 'hud.png'), (await hudWindow.webContents.capturePage()).toPNG());
   const alienHud = new BrowserWindow({ show: false, webPreferences: { preload: path.join(root, 'src/main/preload-hud.cjs'), contextIsolation: true, sandbox: true } });
   await alienHud.loadFile(path.join(root, 'src/renderer/hud.html'));
