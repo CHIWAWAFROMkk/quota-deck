@@ -40,7 +40,7 @@
 ## 3. 结构与删改范围
 
 **保留**
-- `hud-window.cjs`：窗口、40ms 穿透判断、拖动、崩溃恢复。窗口从 480×480 放大到长边 520（竖边时宽 520，横边时高 520；另一维取工作区可用值，上限 520），能容纳 440 卡片 + 浮条 + 6 间距。
+- `hud-window.cjs`：窗口、40ms 穿透判断、拖动、崩溃恢复。窗口从 480×480 放大到 640×600（不超过工作区），size 40 时也能容纳浮条 + 6 间距 + 440 卡片。拖动时每一帧按指针重新吸附并重排窗口（不再让窗口跟手自由移动）。
 - 各家额度客户端、`snapshot.cjs`、`quota-history.cjs`、`claude-oauth.cjs`、托盘。
 
 **改写**
@@ -105,7 +105,7 @@
 ## 5. 卡片、设置页、统计窗口
 
 ### 5.1 外框
-- 宽 440，高随内容（上限为工作区高 − 80，超出时内容区滚动）；圆角 22；纯黑；1px 白 0.14 描边；内边距 14/18/14/18；离浮条 6。
+- 宽 440，高随内容（上限为 HUD 窗口高 − 8，超出时内容区滚动）；圆角 22；纯黑；1px 白 0.14 描边；内边距 14/18/14/18；离浮条 6。
 - 从被点图标处展开，尺寸与位置一起变，400ms 同一曲线；内容淡入：延迟 120ms、220ms ease-out、自停靠边方向 5px 位移；淡出 100ms。
 - 段间距 10；第二段起每段顶部 8 内边距 + 1px 白 0.10 分隔线。
 - 点卡片外、按 Esc、或再点同一图标关闭；点另一图标切换到那家。
@@ -158,8 +158,8 @@
   - Codex：每个文件记住最近一次 `turn_context` 的模型名（跨轮续读时保存在文件状态里）；相邻 `token_count` 的总量增量计入当时的模型；文件中尚未出现 `turn_context` 时计入 `Unknown`。
   - 每个来源最多 6 个模型（按 24h 用量排序），其余并入 `Other`。
   - 显示名映射：如 `claude-opus-5-5` → `Opus 5.5`，`claude-fable-5-1` → `Fable 5.1`，`gpt-5-codex` → `GPT-5 Codex`；未知名原样显示。
-  - 推送结构：`{ status, startAt, partial, total, models: [{ id, name, color, total }], buckets: [[每模型数量…] × 96] }`。
-- **🔥**：沿用 `quota-history` 的 `burnPerHour`。到重置时预计剩余 = 剩余% − 速率 × 距重置小时；>0 写 `N% by reset`，否则写预计用完时间；无速率 `Insufficient data`，速率为 0 `No usage`，已用完 `Exhausted`，数据旧或无重置时间 `No estimate`。
+  - 账本结构：`{ status, startAt, partial, total, buckets: [96 个总量], models: [{ id, name, total }], stacks: [96 × [每模型数量…]] }`；颜色按 `models` 顺序在渲染层分配。主进程推送前再加上 `perHour` / `perDay` 文本（`1.2M/h`、`29M / day`）。
+- **🔥**：沿用 `quota-history` 的 `burnPerHour`。到重置时预计已用 = 已用% + 速率 × 距重置小时（视频：12% + 6.3%/h × 1.2h ≈ 20%）；<100 写 `N% by reset`（绿），否则写预计用完时间（黄）；无速率 `Insufficient data`，速率为 0 `No usage`，已用完 `Exhausted`，数据旧或无重置时间 `No estimate`。
 - **`#`**：最近 4 个桶（1 小时）总量为 `/h`；24h 总量为 `/ day`。
 - **设置**：HUD 设置文件新增 `size`、`ringWidth`、`showsRings`、`showsNumbers`、`metric`（每家一个）；规范化时越界取默认值。主进程改设置后重算浮条尺寸与窗口位置。
 
