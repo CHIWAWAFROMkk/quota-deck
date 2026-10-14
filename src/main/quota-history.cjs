@@ -13,6 +13,8 @@ function createHistory(filePath, { fileSystem = fs, sleep = delay } = {}) {
   async function record(snapshot, now = Date.now()) {
     if (!Number.isFinite(now) || !Number.isFinite(new Date(now).getTime())) throw new TypeError('History sample time must be finite');
     if (!snapshot || typeof snapshot !== 'object') throw new TypeError('History snapshot must be an object');
+    // Trim with the wall clock; an old snapshot's own time must never cut newer rows of other providers.
+    const wallClock = now;
     const observedAt = typeof snapshot.updatedAt === 'string' ? Date.parse(snapshot.updatedAt) : NaN;
     // Re-reading a statusLine file is not a new provider observation.
     if (Number.isFinite(observedAt) && observedAt <= now) now = observedAt;
@@ -30,7 +32,7 @@ function createHistory(filePath, { fileSystem = fs, sleep = delay } = {}) {
         rows = []; // Missing or damaged JSON starts a new sampling series.
       }
     }
-    rows = rows.filter(r => r.at >= now - 24 * 3600000 && r.at <= now).slice(-5000);
+    rows = rows.filter(r => r.at >= wallClock - 24 * 3600000 && r.at <= wallClock).slice(-5000);
     for (const group of Array.isArray(snapshot.groups) ? snapshot.groups : []) {
       for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
         if (!bucket || typeof bucket !== 'object') continue;

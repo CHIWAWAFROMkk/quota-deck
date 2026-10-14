@@ -8,17 +8,16 @@ const CHUNK = 4 * 1024 * 1024;
 const MAX_LINE = 1024 * 1024;
 const MAX_DEPTH = 5;
 
-/** Start of the oldest of 96 local quarter-hour buckets; the newest one contains `now`. */
+/** Start of the oldest of 96 quarter-hour buckets; the newest one contains `now`. */
 function windowStart(now) {
-  const d = new Date(now);
-  d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() - (d.getMinutes() % 15));
-  return d.getTime() - (BUCKETS - 1) * QUARTER;
+  // Every real UTC offset is a multiple of 15 minutes, so epoch quarters are also local quarters,
+  // and epoch arithmetic keeps the two 01:xx hours apart when clocks fall back.
+  return Math.floor(now / QUARTER) * QUARTER - (BUCKETS - 1) * QUARTER;
 }
 
 const count = (usage, key) => (Number.isFinite(usage[key]) && usage[key] > 0 ? usage[key] : 0);
 
-// One assistant message can span several lines; the caller keeps the last one per id.
+// One assistant message can span several lines and be copied into resumed sessions.
 function parseClaudeLine(line) {
   if (!line.includes('"usage"')) return null;
   let row;
@@ -40,13 +39,22 @@ function parseCodexLine(line) {
   return { at, total };
 }
 
-async function listRecentJsonl(root, since, fileSystem) {
+// Usage of a streamed message only grows, so the fullest copy is its final usage, in any file order.
+function keepFullest(map, event) {
+  const known = map.get(event.id);
+  if (!known || event.tokens >= known.tokens) map.set(event.id, event);
+}
+
+async function listRecentJsonl(root, since, fileSystem, isLate) {
   const found = [];
+  let complete = true;
   async function walk(dir, depth) {
+    if (isLate()) { complete = false; return; }
     let entries;
     try { entries = await fileSystem.readdir(dir, { withFileTypes: true }); }
     catch (error) { if (depth === 0) throw error; return; }
     for (const entry of entries) {
+      if (!complete) return;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { if (depth < MAX_DEPTH) await walk(full, depth + 1); continue; }
       if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
@@ -57,18 +65,19 @@ async function listRecentJsonl(root, since, fileSystem) {
     }
   }
   await walk(root, 0);
-  return found;
+  return { found, complete };
 }
 
-// Reads complete lines after state.offset; a trailing partial line waits for the next read.
-async function readLines(file, state, size, fileSystem, onLine) {
-  if (size <= state.offset) return;
+// Reads complete lines from `from`; a trailing partial line waits for the next read.
+// Stops between chunks once the round is late; `done` says whether it reached `size`.
+async function readLines(file, from, size, fileSystem, onLine, { chunkSize, isLate }) {
+  if (size <= from) return { offset: from, done: true };
   const handle = await fileSystem.open(file, 'r');
   try {
-    let position = state.offset;
+    let position = from;
     let carry = Buffer.alloc(0);
     while (position < size) {
-      const chunk = Buffer.alloc(Math.min(CHUNK, size - position));
+      const chunk = Buffer.alloc(Math.min(chunkSize, size - position));
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
       if (!bytesRead) break;
       position += bytesRead;
@@ -79,32 +88,42 @@ async function readLines(file, state, size, fileSystem, onLine) {
         start = end + 1;
       }
       carry = Buffer.from(data.subarray(start));
+      if (position < size && isLate()) break;
     }
-    state.offset = position - carry.length;
+    return { offset: position - carry.length, done: position >= size };
   } finally {
     await handle.close();
   }
 }
 
+// Lines are parsed into a stage and only committed once the read succeeds,
+// so a failed read leaves the previous round's counts untouched.
 const SOURCES = {
   claude: {
-    fresh: () => ({ offset: 0, mtimeMs: 0, events: new Map() }),
-    take(state, line) {
+    fresh: () => ({ offset: 0, size: 0, mtimeMs: 0, events: new Map() }),
+    stage: () => ({ events: new Map() }),
+    take(stage, line) {
       const event = parseClaudeLine(line);
-      if (event) state.events.set(event.id, event);
+      if (event) keepFullest(stage.events, event);
     },
+    commit(state, stage) { for (const event of stage.events.values()) keepFullest(state.events, event); },
     events: state => state.events.values(),
     prune(state, since) { for (const [id, event] of state.events) if (event.at < since) state.events.delete(id); },
   },
   codex: {
-    fresh: () => ({ offset: 0, mtimeMs: 0, lastTotal: 0, events: [] }),
-    take(state, line) {
+    fresh: () => ({ offset: 0, size: 0, mtimeMs: 0, lastTotal: 0, events: [] }),
+    stage: state => ({ lastTotal: state.lastTotal, events: [] }),
+    take(stage, line) {
       const event = parseCodexLine(line);
       if (!event) return;
       // A cumulative total going down starts a new segment counted from zero.
-      const delta = event.total >= state.lastTotal ? event.total - state.lastTotal : event.total;
-      state.lastTotal = event.total;
-      if (delta > 0) state.events.push({ at: event.at, tokens: delta });
+      const delta = event.total >= stage.lastTotal ? event.total - stage.lastTotal : event.total;
+      stage.lastTotal = event.total;
+      if (delta > 0) stage.events.push({ at: event.at, tokens: delta });
+    },
+    commit(state, stage) {
+      state.lastTotal = stage.lastTotal;
+      state.events = state.events.concat(stage.events);
     },
     events: state => state.events,
     prune(state, since) { state.events = state.events.filter(event => event.at >= since); },
@@ -120,47 +139,60 @@ function createTokenLedger({
   codexRoot = path.join(os.homedir(), '.codex', 'sessions'),
   fileSystem = fs,
   budgetMs = 2000,
+  chunkSize = CHUNK,
   clock = Date.now,
 } = {}) {
   const roots = { claude: claudeRoot, codex: codexRoot };
   const files = { claude: new Map(), codex: new Map() };
+  const statuses = { claude: 'ok', codex: 'ok' };
   let pending = null;
 
-  async function readSource(id, startAt, deadline) {
+  async function readSource(id, startAt, isLate) {
     const source = SOURCES[id];
     const known = files[id];
-    const series = emptySeries('ok', startAt);
-    let recent;
-    try { recent = await listRecentJsonl(roots[id], startAt, fileSystem); }
-    catch (error) { return emptySeries(error?.code === 'ENOENT' ? 'unsupported' : 'error', startAt); }
+    let scan;
+    try { scan = await listRecentJsonl(roots[id], startAt, fileSystem, isLate); }
+    catch (error) {
+      if (error?.code === 'ENOENT') { known.clear(); statuses[id] = 'unsupported'; return emptySeries('unsupported', startAt); }
+      return emptySeries('error', startAt); // keep what is known for the next round
+    }
+    if (scan.complete) statuses[id] = 'ok';
+    let partial = !scan.complete;
     const alive = new Set();
-    for (const { file, stat } of recent) {
+    for (const { file, stat } of scan.found) {
       alive.add(file);
-      if (clock() > deadline) { series.partial = true; continue; } // keep what earlier rounds parsed
-      let state = known.get(file);
-      if (!state || stat.size < state.offset || stat.mtimeMs < state.mtimeMs) {
-        state = source.fresh();
-        known.set(file, state);
-      }
+      if (isLate()) { partial = true; continue; } // keep what earlier rounds parsed
+      const previous = known.get(file);
+      // A file smaller than last time (even with a trailing partial line) or older was rewritten.
+      const state = previous && stat.size >= previous.size && stat.mtimeMs >= previous.mtimeMs ? previous : source.fresh();
+      const stage = source.stage(state);
       try {
-        await readLines(file, state, stat.size, fileSystem, line => source.take(state, line));
-        state.mtimeMs = stat.mtimeMs;
+        const { offset, done } = await readLines(file, state.offset, stat.size, fileSystem, line => source.take(stage, line), { chunkSize, isLate });
+        source.commit(state, stage);
+        state.offset = offset;
+        if (done) { state.size = stat.size; state.mtimeMs = stat.mtimeMs; } else partial = true;
         source.prune(state, startAt);
+        known.set(file, state);
       } catch {
-        known.delete(file); // reread from scratch next round rather than double count
-        series.partial = true;
+        partial = true; // the last good state stays; the next round retries from its offset
       }
     }
-    for (const file of [...known.keys()]) if (!alive.has(file)) known.delete(file);
-    const seen = new Set();
+    if (scan.complete) for (const file of [...known.keys()]) if (!alive.has(file)) known.delete(file);
+    const series = emptySeries(statuses[id], startAt);
+    series.partial = partial;
+    const merged = new Map();
+    const plain = [];
     for (const state of known.values()) {
       for (const event of source.events(state)) {
-        if (event.id) { if (seen.has(event.id)) continue; seen.add(event.id); }
-        const index = Math.floor((event.at - startAt) / QUARTER);
-        if (index < 0 || index >= BUCKETS) continue;
-        series.buckets[index] += event.tokens;
-        series.total += event.tokens;
+        if (event.id) keepFullest(merged, event);
+        else plain.push(event);
       }
+    }
+    for (const event of [...merged.values(), ...plain]) {
+      const index = Math.floor((event.at - startAt) / QUARTER);
+      if (index < 0 || index >= BUCKETS) continue;
+      series.buckets[index] += event.tokens;
+      series.total += event.tokens;
     }
     return series;
   }
@@ -168,7 +200,8 @@ function createTokenLedger({
   async function read(now = clock()) {
     const startAt = windowStart(now);
     const deadline = clock() + budgetMs;
-    return { claude: await readSource('claude', startAt, deadline), codex: await readSource('codex', startAt, deadline) };
+    const isLate = () => clock() > deadline;
+    return { claude: await readSource('claude', startAt, isLate), codex: await readSource('codex', startAt, isLate) };
   }
 
   return {

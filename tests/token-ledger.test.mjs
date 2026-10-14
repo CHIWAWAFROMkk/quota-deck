@@ -108,3 +108,100 @@ test('events land in the right quarter hour, and missing roots are unsupported',
   assert.equal(result.codex.status, 'unsupported');
   assert.equal(result.codex.total, 0);
 });
+
+// --- Codex review regressions (2026-10-13) ---
+import fsp from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+
+function wrapFs(clock, { readCost = 0, readdirCost = () => 0, failOpen = () => false } = {}) {
+  return {
+    readdir: async (...args) => { clock.now += readdirCost(); return fsp.readdir(...args); },
+    stat: (...args) => fsp.stat(...args),
+    open: async (...args) => {
+      if (failOpen()) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      const handle = await fsp.open(...args);
+      return { read: async (...rest) => { const result = await handle.read(...rest); clock.now += readCost; return result; }, close: () => handle.close() };
+    },
+  };
+}
+
+test('the fullest usage of a message wins, whatever the file order', async () => {
+  for (const [first, second] of [[1, 9], [9, 1]]) {
+    const { claudeRoot, codexRoot } = await roots();
+    const now = Date.now();
+    await writeFile(path.join(claudeRoot, 'proj', 'a.jsonl'), claudeLine('m1', now - 1000, { output_tokens: first }) + '\n');
+    await writeFile(path.join(claudeRoot, 'proj', 'z.jsonl'), claudeLine('m1', now - 1000, { output_tokens: second }) + '\n');
+    assert.equal((await ledger.createTokenLedger({ claudeRoot, codexRoot }).read(now)).claude.total, 9, `${first} then ${second}`);
+  }
+});
+
+test('a truncation is noticed even when the old file ended in a partial line', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  const file = path.join(claudeRoot, 'proj', 'cut.jsonl');
+  const first = claudeLine('a', now - 1000, { output_tokens: 100 }) + '\n';
+  await writeFile(file, first + 'x'.repeat(1000));
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot });
+  assert.equal((await reader.read(now)).claude.total, 100);
+  const replacement = claudeLine('c', now - 500, { output_tokens: 3 }) + '\n';
+  await writeFile(file, replacement + ' '.repeat(Math.max(0, first.length - replacement.length + 50)) + '\n');
+  assert.equal((await reader.read(now)).claude.total, 3);
+});
+
+test('the time budget also stops inside a file and resumes without double counting', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  await writeFile(path.join(claudeRoot, 'proj', 'big.jsonl'), Array.from({ length: 12 }, (_, i) => claudeLine(`m${i}`, now - 1000, { output_tokens: 1 })).join('\n') + '\n');
+  const clock = { now: 0 };
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot, chunkSize: 256, budgetMs: 2000, clock: () => clock.now, fileSystem: wrapFs(clock, { readCost: 1500 }) });
+  const first = await reader.read(now);
+  assert.equal(first.claude.partial, true);
+  assert.ok(first.claude.total > 0 && first.claude.total < 12, `first round counted ${first.claude.total}`);
+  let result = first;
+  for (let i = 0; i < 30 && result.claude.partial; i++) result = await reader.read(now);
+  assert.equal(result.claude.partial, false);
+  assert.equal(result.claude.total, 12);
+});
+
+test('an interrupted directory scan keeps what earlier rounds counted', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  await writeFile(path.join(claudeRoot, 'proj', 'a.jsonl'), claudeLine('m1', now - 1000, { output_tokens: 5 }) + '\n');
+  const clock = { now: 0 };
+  let slow = false;
+  let slowScans = 0;
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot, clock: () => clock.now, fileSystem: wrapFs(clock, { readdirCost: () => (slow ? (slowScans++, 1500) : 0) }) });
+  assert.equal((await reader.read(now)).claude.total, 5);
+  slow = true;
+  const second = await reader.read(now);
+  assert.equal(second.claude.partial, true);
+  assert.equal(second.claude.total, 5);
+  assert.ok(slowScans <= 2, `scan kept going past the deadline: ${slowScans} directory reads`);
+});
+
+test('a temporary read error keeps the counts from earlier rounds', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  const file = path.join(claudeRoot, 'proj', 'a.jsonl');
+  await writeFile(file, claudeLine('m1', now - 1000, { output_tokens: 5 }) + '\n');
+  let fail = false;
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot, fileSystem: wrapFs({ now: 0 }, { failOpen: () => fail }) });
+  assert.equal((await reader.read(now)).claude.total, 5);
+  await appendFile(file, claudeLine('m2', now - 500, { output_tokens: 2 }) + '\n');
+  fail = true;
+  const failed = await reader.read(now);
+  assert.equal(failed.claude.total, 5);
+  assert.equal(failed.claude.partial, true);
+  fail = false;
+  assert.equal((await reader.read(now)).claude.total, 7);
+});
+
+test('quarter alignment survives the repeated hour when clocks fall back', () => {
+  const script = `const l = require(${JSON.stringify(path.resolve('src/main/token-ledger.cjs'))});
+const now = Date.parse('2026-11-01T09:07:30Z');
+process.stdout.write(JSON.stringify({ start: l.windowStart(now), offset: new Date(now).getTimezoneOffset() }));`;
+  const run = spawnSync(process.execPath, ['-e', script], { env: { ...process.env, TZ: 'America/Los_Angeles' }, encoding: 'utf8' });
+  const result = JSON.parse(run.stdout);
+  assert.equal(result.offset, 480, 'TZ must take effect for this check to mean anything');
+  assert.equal(result.start, Date.parse('2026-11-01T09:00:00Z') - 95 * QUARTER);
+});

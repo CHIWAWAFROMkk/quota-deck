@@ -48,3 +48,18 @@ test('Claude pools are sampled, and stale data shows no rate', async () => {
   assert.equal(stale.gauge.windows[0].burnPerHour, null);
   assert.equal(stale.pools[0].windows[0].burnPerHour, null);
 });
+
+import { readFile } from 'node:fs/promises';
+import historyModule from '../src/main/quota-history.cjs';
+
+test('an old Claude bridge snapshot does not trim newer samples of other providers', async () => {
+  const file = await historyFile();
+  const history = historyModule.createHistory(file);
+  const base = Date.now();
+  const reset = new Date(base + 3 * 3600000).toISOString();
+  for (const [offset, fraction] of [[-600000, 0.8], [-300000, 0.79], [0, 0.78]]) {
+    await history.record({ id: 'codex', status: 'healthy', updatedAt: new Date(base + offset).toISOString(), groups: [{ displayName: 'Codex 账户额度', buckets: [{ bucketId: '300', remainingFraction: fraction, resetTime: reset }] }] });
+  }
+  await history.record({ id: 'claude', status: 'stale', updatedAt: new Date(base - 3600000).toISOString(), groups: [{ displayName: 'Claude 订阅共享额度', buckets: [{ bucketId: 'five_hour', remainingFraction: 0.5, resetTime: reset }] }] });
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).length, 3);
+});
