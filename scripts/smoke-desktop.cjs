@@ -123,6 +123,10 @@ app.whenReady().then(async () => {
     b.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10 }));
     b.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true, screenX: 10, screenY: 10 })); })()`);
   await until(() => hudEval('!document.querySelector("#card").hidden && document.querySelectorAll("#card .row").length === 2'));
+  const sameLayout = await hudEval('hud.initial().then(state => state.layout)');
+  hudWindow.webContents.send('hud:layout', sameLayout);
+  await hudEval('new Promise(resolve => setTimeout(resolve, 100))');
+  assert.equal(await hudEval('document.querySelector("#card").hidden'), false, 'an unchanged layout (e.g. taskbar auto-hide) keeps the card open');
   assert.ok(await hudEval('document.querySelectorAll("#card .chart rect").length') > 0);
   assert.equal(await hudEval('/NaN|undefined/.test(document.querySelector("#card").innerText)'), false);
   await hudEval('document.querySelector("#card .row").click()');

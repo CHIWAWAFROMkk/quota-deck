@@ -12,7 +12,7 @@
   let openId = null;
   let showRate = false;
   let press = null;
-  let inside = false;
+  let lastHits = '';
   let pillTimer = null;
   let pillHide = null;
   let stripHide = null;
@@ -52,8 +52,21 @@
     }, [el('span', { class: 'mark' }, [ring(item), logo(item, 'logo')]), el('span', { class: `num ${item.ring.level}`, text: item.label })])));
   }
 
+  // Tell the main process where the visible parts are; it turns click-through off only over them.
+  function reportHits() {
+    const rects = [strip, card].filter(node => !node.hidden).map(node => node.getBoundingClientRect())
+      .map(r => ({ x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }));
+    const key = JSON.stringify(rects);
+    if (key === lastHits) return;
+    lastHits = key;
+    window.hud.hits(rects);
+  }
+  const scheduleHits = () => requestAnimationFrame(reportHits);
+  new ResizeObserver(scheduleHits).observe(strip);
+
   function applyLayout(next) {
     if (!next) return;
+    const moved = next.edge !== layout.edge || next.strip.x !== layout.strip.x || next.strip.y !== layout.strip.y || next.size.width !== layout.size.width || next.size.height !== layout.size.height;
     layout = next;
     document.body.className = `edge-${layout.edge}${layout.dragging ? ' dragging' : ''}`;
     const s = strip.style;
@@ -64,7 +77,8 @@
     if (layout.edge === 'right') { s.right = `${width - x - STRIP.short}px`; s.top = `${y}px`; }
     if (layout.edge === 'top') { s.top = `${y}px`; s.left = `${x + STRIP.long / 2}px`; }
     if (layout.edge === 'bottom') { s.bottom = `${height - y - STRIP.short}px`; s.left = `${x + STRIP.long / 2}px`; }
-    if (!layout.dragging) { hidePill(); closeCard(); }
+    if (!layout.dragging && moved) { hidePill(); closeCard(); }
+    scheduleHits();
   }
 
   // Put a floating node beside an anchor, on the side of the strip that faces into the screen.
@@ -163,6 +177,7 @@
     ];
     card.replaceChildren(...parts.filter(Boolean));
     place(card, button(item.id), 8);
+    scheduleHits();
   }
 
   function openCard(id) {
@@ -183,6 +198,7 @@
     card.hidden = true;
     if (!strip.matches(':hover')) strip.classList.remove('open');
     renderStrip();
+    scheduleHits();
     window.hud.card(false);
   }
 
@@ -249,14 +265,6 @@
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeCard(); });
   window.addEventListener('blur', closeCard);
 
-  // The window ignores the mouse except over visible parts; forwarded moves tell us when to stop ignoring.
-  document.addEventListener('mousemove', event => {
-    const now = Boolean(press) || Boolean(event.target.closest?.('.hit'));
-    if (now !== inside) { inside = now; window.hud.pointer(now); }
-  });
-  document.documentElement.addEventListener('mouseleave', () => {
-    if (inside && !press) { inside = false; window.hud.pointer(false); }
-  });
 
   window.hud.onState(setItems);
   window.hud.onTokens(next => { tokens = next; if (openId) renderCard(); });

@@ -25,7 +25,7 @@ async function readCredentials(file) {
   let text;
   try { text = await fs.readFile(file, 'utf8'); } catch { return null; }
   try {
-    const o = JSON.parse(text.replace(/^﻿/, ''))?.claudeAiOauth;
+    const o = JSON.parse(text.replace(/^\uFEFF/, ''))?.claudeAiOauth;
     if (typeof o?.accessToken !== 'string' || !o.accessToken) return null;
     return { token: o.accessToken, plan: typeof o.subscriptionType === 'string' ? o.subscriptionType : '' };
   } catch {

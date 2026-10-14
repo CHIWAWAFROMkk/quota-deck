@@ -49,3 +49,18 @@ test('a removed display falls back to the primary one', () => {
   assert.equal(pickDisplay([primary], primary, 2), primary);
   assert.equal(pickDisplay([primary], primary, null), primary);
 });
+
+test('hit rectangles from the renderer are validated', () => {
+  assert.deepEqual(geometry.normalizeHits('nope'), []);
+  assert.deepEqual(geometry.normalizeHits([{ x: 1, y: 2, width: 3, height: 4, extra: 1 }, { x: NaN, y: 0, width: 1, height: 1 }, { x: 0, y: 0, width: 0, height: 5 }, null]), [{ x: 1, y: 2, width: 3, height: 4 }]);
+  assert.equal(geometry.normalizeHits(Array.from({ length: 10 }, () => ({ x: 0, y: 0, width: 1, height: 1 }))).length, 4);
+});
+
+test('the pointer is over a hit area only inside its rectangle plus a small margin', () => {
+  const bounds = { x: 1440, y: 104, width: 480, height: 480 };
+  const hits = [{ x: 443, y: 161, width: 34, height: 158 }];
+  assert.equal(geometry.pointerOverHits({ cursor: { x: 1440 + 450, y: 104 + 200 }, bounds, hits }), true);
+  assert.equal(geometry.pointerOverHits({ cursor: { x: 1440 + 442, y: 104 + 200 }, bounds, hits }), true);
+  assert.equal(geometry.pointerOverHits({ cursor: { x: 1440 + 100, y: 104 + 100 }, bounds, hits }), false);
+  assert.equal(geometry.pointerOverHits({ cursor: { x: 1440 + 450, y: 104 + 200 }, bounds, hits: [] }), false);
+});

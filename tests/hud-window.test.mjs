@@ -46,6 +46,8 @@ function fakeElectron() {
     hide() {}
     isDestroyed() { return this.destroyed; }
     setBounds(bounds) { this.position = [bounds.x, bounds.y]; }
+    getBounds() { return { x: this.position[0], y: this.position[1], width: 480, height: 480 }; }
+    isVisible() { return true; }
     getPosition() { return this.position; }
     setPosition(x, y) { this.position = [x, y]; this.moves++; }
     loadFile() { this.loads++; return Promise.resolve(); }
@@ -101,10 +103,31 @@ test('untrusted senders cannot drive the HUD', async () => {
   const win = fake.windows[0];
   win.webContents.emit('did-finish-load');
   const alien = { sender: {}, senderFrame: win.webContents.mainFrame };
-  fake.ipc.on['hud:pointer'](alien, true);
+  fake.ipc.on['hud:hits'](alien, [{ x: 0, y: 0, width: 480, height: 480 }]);
+  await sleep(100);
   fake.ipc.on['hud:card'](alien, true);
   assert.equal(win.ignore, true);
   assert.equal(win.focusable, false);
   assert.throws(() => fake.ipc.handle['hud:initial'](alien));
+  hud.destroy();
+});
+
+test('the main process drops click-through only while the cursor is over a reported hit area', async () => {
+  const fake = fakeElectron();
+  const hud = hudWindow.createHud({ settingsPath: await settingsPath(), onRefresh: async () => {}, onOpenPanel() {}, electron: fake.electron });
+  const win = fake.windows[0];
+  win.webContents.emit('did-finish-load');
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  fake.ipc.on['hud:hits'](event, [{ x: 443, y: 161, width: 34, height: 158 }]);
+  fake.moveCursor(1440 + 450, 104 + 200);
+  await sleep(120);
+  assert.equal(win.ignore, false, 'over the strip');
+  fake.moveCursor(1440 + 100, 104 + 100);
+  await sleep(120);
+  assert.equal(win.ignore, true, 'over the transparent area');
+  fake.ipc.on['hud:hits'](event, 'garbage');
+  fake.moveCursor(1440 + 450, 104 + 200);
+  await sleep(120);
+  assert.equal(win.ignore, true, 'invalid hits mean nothing to hit');
   hud.destroy();
 });

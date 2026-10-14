@@ -50,9 +50,24 @@ function snapToEdge({ workArea: wa, point }) {
   return { edge, offset: clamp(along, 0, 1) };
 }
 
+/** Hit rectangles (window-relative px) reported by the renderer, validated; at most four. */
+function normalizeHits(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 4)
+    .filter(r => r && typeof r === 'object' && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(r[key])) && r.width > 0 && r.height > 0 && r.width <= 4096 && r.height <= 4096)
+    .map(r => ({ x: r.x, y: r.y, width: r.width, height: r.height }));
+}
+
+/** Whether a screen point lies over a hit rectangle of the window at `bounds`, give or take `margin`. */
+function pointerOverHits({ cursor, bounds, hits, margin = 2 }) {
+  const x = cursor.x - bounds.x;
+  const y = cursor.y - bounds.y;
+  return hits.some(r => x >= r.x - margin && x <= r.x + r.width + margin && y >= r.y - margin && y <= r.y + r.height + margin);
+}
+
 /** The saved display if it is still connected, otherwise the primary one. */
 function pickDisplay(displays, primary, displayId) {
   return displays.find(display => display.id === displayId) || primary;
 }
 
-module.exports = { DEFAULT_SETTINGS, EDGES, MARGIN, STRIP, WINDOW_SIZE, layoutHud, normalizeHudSettings, pickDisplay, snapToEdge };
+module.exports = { DEFAULT_SETTINGS, EDGES, MARGIN, STRIP, WINDOW_SIZE, layoutHud, normalizeHits, normalizeHudSettings, pickDisplay, pointerOverHits, snapToEdge };

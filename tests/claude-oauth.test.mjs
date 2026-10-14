@@ -91,3 +91,9 @@ test('429 backs off, doubling, and a success resets the backoff', async () => {
   t += 2_000; status = 200; assert.equal((await read()).ok, true); assert.equal(calls, 3);
   status = 429; await read(); t += 121_000; await read(); assert.equal(calls, 5);
 });
+
+test('credentials saved with a UTF-8 BOM are still read', async () => {
+  const file = await credentials('﻿' + JSON.stringify(good));
+  const result = await oauth.createClaudeOAuthReader({ credentialsPath: file, now: () => now, fetchImpl: reply(200, body) })();
+  assert.equal(result.ok, true);
+});

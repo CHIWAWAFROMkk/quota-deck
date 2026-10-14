@@ -2,13 +2,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { isTrustedRenderer } = require('./security.cjs');
-const { STRIP, WINDOW_SIZE, layoutHud, normalizeHudSettings, pickDisplay, snapToEdge } = require('./hud-geometry.cjs');
+const { STRIP, WINDOW_SIZE, layoutHud, normalizeHits, normalizeHudSettings, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
 
 const hudEntry = path.join(__dirname, '..', 'renderer', 'hud.html');
 const DRAG_LIMIT_MS = 60_000;
 // On Windows only 'normal' and 'pop-up-menu'+ make the window topmost; 'floating' (the default) does not.
 const TOP_LEVEL = 'normal';
-const SEND_CHANNELS = ['hud:pointer', 'hud:drag', 'hud:card'];
+// Forwarded mouse events flap between enter and leave on Windows, so the main process
+// decides click-through itself by polling the cursor against the rectangles the page reports.
+const POLL_MS = 40;
+const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card'];
 const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:open-panel'];
 
 function loadSettings(file) {
@@ -36,6 +39,8 @@ function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('e
   let drag = null;
   let ignoring = null;
   let recoveries = [];
+  let hits = [];
+  let poll = null;
 
   const alive = () => win && !win.isDestroyed();
   const send = (channel, payload) => { try { if (alive()) win.webContents.send(channel, payload); } catch { /* renderer restarting */ } };
@@ -68,10 +73,16 @@ function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('e
   // put the window back to match before it loads, or a drag or card could outlive it.
   function resetInteraction() {
     if (drag) { clearInterval(drag.timer); drag = null; }
+    hits = [];
     if (!alive()) return;
     setIgnore(true);
     win.setFocusable(false);
     place();
+  }
+
+  function trackPointer() {
+    if (!alive() || drag || !win.isVisible()) return;
+    setIgnore(!pointerOverHits({ cursor: screen.getCursorScreenPoint(), bounds: win.getBounds(), hits }));
   }
 
   function startDrag() {
@@ -137,11 +148,13 @@ function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('e
       recoveries.push(now);
       setTimeout(() => { if (win === created && alive()) created.loadFile(hudEntry).catch(() => {}); }, 250);
     });
-    win.on('closed', () => { if (win === created) { win = null; if (drag) { clearInterval(drag.timer); drag = null; } } });
+    win.on('closed', () => { if (win === created) { win = null; clearInterval(poll); poll = null; if (drag) { clearInterval(drag.timer); drag = null; } } });
+    clearInterval(poll);
+    poll = setInterval(trackPointer, POLL_MS);
     win.loadFile(hudEntry).catch(() => {});
   }
 
-  ipcMain.on('hud:pointer', (event, inside) => { if (trusted(event) && typeof inside === 'boolean' && !drag) setIgnore(!inside); });
+  ipcMain.on('hud:hits', (event, rects) => { if (trusted(event)) hits = normalizeHits(rects); });
   ipcMain.on('hud:drag', (event, phase) => { if (!trusted(event)) return; if (phase === 'start') startDrag(); else if (phase === 'end') endDrag(); });
   ipcMain.on('hud:card', (event, open) => {
     if (!trusted(event) || typeof open !== 'boolean') return;
@@ -177,6 +190,8 @@ function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('e
     window: () => (alive() ? win : null),
     destroy() {
       if (drag) { clearInterval(drag.timer); drag = null; }
+      clearInterval(poll);
+      poll = null;
       screen.removeListener('display-metrics-changed', onDisplays);
       screen.removeListener('display-added', onDisplays);
       screen.removeListener('display-removed', onDisplays);

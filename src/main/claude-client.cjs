@@ -76,7 +76,7 @@ async function readClaudeSnapshot(options = {}) {
     if ((await fs.stat(file)).size > 65536) throw new Error('Claude 快照超出大小限制');
     const text = await fs.readFile(file, 'utf8');
     if (Buffer.byteLength(text) > 65536) throw new Error('Claude 快照超出大小限制');
-    const snapshot = normalizeClaudeSnapshot(JSON.parse(text.replace(/^﻿/, '')), options.now);
+    const snapshot = normalizeClaudeSnapshot(JSON.parse(text.replace(/^\uFEFF/, '')), options.now);
     if (failure) snapshot.note = `${REASONS[failure]}以下为状态栏观测。${snapshot.note}`;
     return { chainConnected, ...snapshot };
   } catch (error) {
