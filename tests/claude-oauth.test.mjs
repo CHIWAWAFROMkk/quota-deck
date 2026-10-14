@@ -89,11 +89,33 @@ test('429 backs off, doubling, and a success resets the backoff', async () => {
   t += 61_000; await read(); assert.equal(calls, 2); // now waits 4 min
   t += 239_000; await read(); assert.equal(calls, 2);
   t += 2_000; status = 200; assert.equal((await read()).ok, true); assert.equal(calls, 3);
-  status = 429; await read(); t += 121_000; await read(); assert.equal(calls, 5);
+  status = 429; t += 300_001; await read(); t += 121_000; await read(); assert.equal(calls, 5);
 });
 
 test('credentials saved with a UTF-8 BOM are still read', async () => {
   const file = await credentials('﻿' + JSON.stringify(good));
   const result = await oauth.createClaudeOAuthReader({ credentialsPath: file, now: () => now, fetchImpl: reply(200, body) })();
   assert.equal(result.ok, true);
+});
+
+test('a good reading is reused for five minutes and kept for when the API fails', async () => {
+  const file = await credentials(good);
+  let t = now;
+  let calls = 0;
+  let status = 200;
+  const read = oauth.createClaudeOAuthReader({ credentialsPath: file, now: () => t, fetchImpl: async () => { calls++; return reply(status, body)(); } });
+  const first = await read();
+  assert.equal(first.ok, true);
+  t += 4 * 60_000;
+  const cached = await read();
+  assert.equal(calls, 1);
+  assert.equal(cached.snapshot.updatedAt, first.snapshot.updatedAt);
+  t += 2 * 60_000;
+  status = 429;
+  const limited = await read();
+  assert.equal(calls, 2);
+  assert.equal(limited.ok, false);
+  assert.equal(limited.reason, 'rate-limited');
+  assert.equal(limited.last.updatedAt, first.snapshot.updatedAt);
+  assert.doesNotMatch(JSON.stringify(limited), /secret-token/);
 });

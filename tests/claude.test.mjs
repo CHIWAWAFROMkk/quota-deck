@@ -88,3 +88,17 @@ test('Claude prefers the official usage API and falls back to the statusLine sna
   const noLogin = await claude.readClaudeSnapshot({ oauth: async () => ({ ok: false, reason: 'no-credentials' }), chainConnected: false, snapshotPath: path.join(dir, 'missing.json') });
   assert.equal(noLogin.status, 'unsupported');
 });
+
+test('when the usage API fails, the last official reading is shown as stale before any bridge data', async () => {
+  const last = oauthModule.parseUsage({ five_hour: { utilization: 56, resets_at: '2026-09-25T03:00:00Z' } }, 'max', now);
+  await mkdir('work', { recursive: true });
+  const dir = await mkdtemp(path.resolve('work/claude-last-'));
+  const file = path.join(dir, 'snapshot.json');
+  await writeFile(file, JSON.stringify(claude.sanitizeClaudePayload(payload, now)));
+  const result = await claude.readClaudeSnapshot({ oauth: async () => ({ ok: false, reason: 'rate-limited', last }), chainConnected: false, snapshotPath: file, now });
+  assert.equal(result.source, oauthModule.OAUTH_SOURCE);
+  assert.equal(result.status, 'stale');
+  assert.equal(result.remainingPercent, 44);
+  assert.match(result.note, /限流/);
+  assert.equal(snapshots.providerToUi(result).gauge.provenance, 'stale');
+});

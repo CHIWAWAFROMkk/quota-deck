@@ -70,6 +70,10 @@ async function readClaudeSnapshot(options = {}) {
     const result = await oauth();
     if (result.ok) return { chainConnected, ...result.snapshot };
     failure = result.reason;
+    // A recent official reading, marked stale, beats an older statusLine observation.
+    if (result.last) {
+      return { chainConnected, ...result.last, status: 'stale', note: `${REASONS[failure]}以下为最近一次官方读数。` };
+    }
   }
   const file = options.snapshotPath || process.env.QUOTADECK_CLAUDE_SNAPSHOT || defaultClaudeSnapshotPath();
   try {

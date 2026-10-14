@@ -15,6 +15,9 @@ const REASONS = {
 };
 const BACKOFF_START = 2 * 60_000;
 const BACKOFF_MAX = 15 * 60_000;
+// The usage endpoint rate-limits hard (and Claude tools such as a desktop pet poll it too),
+// so a good reading is reused for five minutes instead of asking on every refresh.
+const MIN_INTERVAL = 5 * 60_000;
 
 function defaultCredentialsPath() {
   return path.join(os.homedir(), '.claude', '.credentials.json');
@@ -85,11 +88,16 @@ function defaultFetch() {
 function createClaudeOAuthReader({ credentialsPath = defaultCredentialsPath(), fetchImpl = null, now = Date.now, timeoutMs = 15_000 } = {}) {
   let backoff = 0;
   let blockedUntil = 0;
+  let last = null;
+  let lastAt = 0;
+  // Failures carry the last good reading so callers can show it as stale rather than nothing.
+  const fail = reason => (last ? { ok: false, reason, last } : { ok: false, reason });
   return async function readClaudeOAuth() {
     const t = now();
-    if (t < blockedUntil) return { ok: false, reason: 'rate-limited' };
+    if (last && t - lastAt < MIN_INTERVAL) return { ok: true, snapshot: last };
+    if (t < blockedUntil) return fail('rate-limited');
     const credentials = await readCredentials(credentialsPath);
-    if (!credentials) return { ok: false, reason: 'no-credentials' };
+    if (!credentials) { last = null; return { ok: false, reason: 'no-credentials' }; }
     let response;
     try {
       response = await (fetchImpl || defaultFetch())(USAGE_URL, {
@@ -98,21 +106,23 @@ function createClaudeOAuthReader({ credentialsPath = defaultCredentialsPath(), f
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
-      return { ok: false, reason: 'network' }; // never forward the error: it may echo request details
+      return fail('network'); // never forward the error: it may echo request details
     }
-    if (response.status === 401 || response.status === 403) return { ok: false, reason: 'expired' };
+    if (response.status === 401 || response.status === 403) return fail('expired');
     if (response.status === 429) {
       backoff = Math.min(BACKOFF_MAX, backoff ? backoff * 2 : BACKOFF_START);
       blockedUntil = t + backoff;
-      return { ok: false, reason: 'rate-limited' };
+      return fail('rate-limited');
     }
-    if (!response.ok) return { ok: false, reason: 'network' };
+    if (!response.ok) return fail('network');
     let json;
-    try { json = await response.json(); } catch { return { ok: false, reason: 'bad-response' }; }
+    try { json = await response.json(); } catch { return fail('bad-response'); }
     const snapshot = parseUsage(json, credentials.plan, t);
-    if (!snapshot) return { ok: false, reason: 'bad-response' };
+    if (!snapshot) return fail('bad-response');
     backoff = 0;
     blockedUntil = 0;
+    last = snapshot;
+    lastAt = t;
     return { ok: true, snapshot };
   };
 }
