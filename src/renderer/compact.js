@@ -62,7 +62,7 @@
     if (provider.pools?.length) {
       const unassigned = provider.models.filter((model) => !provider.pools.some((pool) => pool.name === model.pool)).map((model) => model.name);
       return provider.pools.map((pool) => `<section class="pool">
-          <div class="pool-head"><strong>${escapeHtml(pool.name)}</strong><span>${pool.modelCount} 个模型共用</span></div>
+          <div class="pool-head"><strong>${escapeHtml(pool.name)}</strong><span>${pool.modelCount ? `${pool.modelCount} 个模型共用` : '账户共享额度'}</span></div>
           ${pool.windows.map((window) => `${windowRow(window, stale)}<div class="burn">${window.samplingSupported ? `${stale ? '旧数据 · 暂停估算' : escapeHtml(burnText(window.burnPerHour))} · ` : ''}${Number.isFinite(window.estimatedHoursLeft) ? `按近期速度约 ${window.estimatedHoursLeft.toFixed(1)} 小时耗尽 · ` : ''}${escapeHtml(resetText(window))}</div>`).join('')}
           ${chips(modelNamesForPool(provider, pool.name))}
         </section>`).join('') + (unassigned.length ? `<section class="pool"><div class="pool-head"><strong>额度归属待确认</strong><span>${unassigned.length} 个模型</span></div>${chips(unassigned)}</section>` : '');

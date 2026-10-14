@@ -6,6 +6,8 @@ const { readClaudeSnapshot } = require('./claude-client.cjs');
 const { localAgentAvailability } = require('./orchestrator.cjs');
 const { inferModelStrengths } = require('./model-guidance.cjs');
 const { createHistory } = require('./quota-history.cjs');
+const { OAUTH_SOURCE } = require('./claude-oauth.cjs');
+const planName = plan => (plan ? `Claude ${plan[0].toUpperCase()}${plan.slice(1)}` : 'Claude');
 let history = null;
 function configureHistory(filePath) { history = createHistory(filePath); }
 
@@ -209,7 +211,7 @@ function providerToUi(provider) {
     gauge: gaugeFor(provider, { percent, balance, stale, pools }),
     status: displayStatus,
     statusText: provider.id === 'claude' && provider.chainConnected && displayStatus === 'unsupported' ? '等待数据' : statusText(displayStatus),
-    plan: stale ? `旧数据 · ${freshness}` : provider.status === 'error' ? '连接异常 · 请重试' : provider.id === 'claude' ? '官方 statusLine · 当前会话观测' : provider.id === 'codex'
+    plan: stale ? `旧数据 · ${freshness}` : provider.status === 'error' ? '连接异常 · 请重试' : provider.id === 'claude' ? (provider.source === OAUTH_SOURCE ? `${planName(provider.planType)} · 官方用量接口` : '官方 statusLine · 当前会话观测') : provider.id === 'codex'
       ? `${provider.planType || 'ChatGPT'} · 官方额度窗口`
       : provider.id === 'workbuddy' && provider.planType
         ? `${provider.planType} · 官方网页快照`
@@ -222,7 +224,7 @@ function providerToUi(provider) {
     models,
     pools,
     modelDirectoryStatus: provider.modelDirectoryStatus,
-    setupAction: provider.id === 'claude' ? (provider.chainConnected ? 'claude-disconnect' : 'claude-connect') : provider.id === 'workbuddy' ? 'open-workbuddy' : null,
+    setupAction: provider.id === 'claude' ? (provider.chainConnected ? 'claude-disconnect' : provider.source === OAUTH_SOURCE ? null : 'claude-connect') : provider.id === 'workbuddy' ? 'open-workbuddy' : null,
     chainConnected: provider.id === 'claude' ? provider.chainConnected === true : undefined,
     action: models.length === 0
       ? provider.id === 'workbuddy'

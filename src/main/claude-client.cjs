@@ -2,6 +2,8 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { createClaudeOAuthReader, REASONS } = require('./claude-oauth.cjs');
+let sharedOAuth = null;
 
 function defaultClaudeSnapshotPath() {
   return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'QuotaDeck', 'claude-usage.json');
@@ -59,16 +61,29 @@ function normalizeClaudeSnapshot(input, now = Date.now()) {
 }
 
 async function readClaudeSnapshot(options = {}) {
-  const file = options.snapshotPath || process.env.QUOTADECK_CLAUDE_SNAPSHOT || defaultClaudeSnapshotPath();
+  // Official usage API first; the statusLine bridge stays as a fallback for when it is unreachable.
+  const oauth = options.oauth === undefined ? (sharedOAuth ??= createClaudeOAuthReader()) : options.oauth;
   // Lazy require: only the desktop app needs to know whether the statusLine chain is installed.
   const chainConnected = options.chainConnected ?? require('./claude-statusline-chain.cjs').connectionState().connected;
+  let failure = null;
+  if (oauth) {
+    const result = await oauth();
+    if (result.ok) return { chainConnected, ...result.snapshot };
+    failure = result.reason;
+  }
+  const file = options.snapshotPath || process.env.QUOTADECK_CLAUDE_SNAPSHOT || defaultClaudeSnapshotPath();
   try {
     if ((await fs.stat(file)).size > 65536) throw new Error('Claude 快照超出大小限制');
     const text = await fs.readFile(file, 'utf8');
     if (Buffer.byteLength(text) > 65536) throw new Error('Claude 快照超出大小限制');
-    return { chainConnected, ...normalizeClaudeSnapshot(JSON.parse(text.replace(/^\uFEFF/, '')), options.now) };
+    const snapshot = normalizeClaudeSnapshot(JSON.parse(text.replace(/^﻿/, '')), options.now);
+    if (failure) snapshot.note = `${REASONS[failure]}以下为状态栏观测。${snapshot.note}`;
+    return { chainConnected, ...snapshot };
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
+    if (failure && failure !== 'no-credentials') {
+      return { id: 'claude', name: 'Claude Code', status: 'error', precision: 'unavailable', updatedAt: null, models: [], source: 'Claude 官方用量接口', note: REASONS[failure], chainConnected };
+    }
     const note = chainConnected
       ? '已接入，等 Claude Code 下一次回复后显示额度。原有状态栏照常显示。'
       : '尚未接入。一键接入会把 Claude 状态栏的数据同时转给 QuotaDeck，你现在的状态栏照常显示，不需要密钥。';
