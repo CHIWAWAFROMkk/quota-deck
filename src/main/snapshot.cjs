@@ -9,6 +9,31 @@ const { createHistory } = require('./quota-history.cjs');
 const { OAUTH_SOURCE } = require('./claude-oauth.cjs');
 const planName = plan => (plan ? `Claude ${plan[0].toUpperCase()}${plan.slice(1)}` : 'Claude');
 let history = null;
+const SAMPLED = ['antigravity', 'claude', 'codex'];
+
+// Codex reports windows without pools. Give the history temporary buckets,
+// then copy the rates back onto the windows so the big panel's layout is unchanged.
+async function recordHistory(result) {
+  const synthetic = !result.groups?.length && Array.isArray(result.windows) && result.windows.length > 0;
+  if (synthetic) {
+    result.groups = [{ displayName: `${result.name} 账户额度`, buckets: result.windows.map(w => ({
+      bucketId: `${w.windowDurationMins || w.label}`,
+      remainingFraction: Number.isFinite(w.remainingPercent) ? w.remainingPercent / 100 : null,
+      resetTime: w.resetsAt,
+    })) }];
+  }
+  try {
+    await history.record(result);
+  } finally {
+    if (synthetic) {
+      result.groups[0].buckets.forEach((bucket, i) => {
+        result.windows[i].burnPerHour = Number.isFinite(bucket.burnPerHour) ? bucket.burnPerHour : null;
+        result.windows[i].estimatedHoursLeft = Number.isFinite(bucket.estimatedHoursLeft) ? bucket.estimatedHoursLeft : null;
+      });
+      delete result.groups;
+    }
+  }
+}
 function configureHistory(filePath) { history = createHistory(filePath); }
 
 function unavailable(id, name, note, source = '手动') {
@@ -49,8 +74,8 @@ function createProviderReader(providerReaders) {
       result.modelDirectoryUpdatedAt = lastGood.get(id).modelDirectoryUpdatedAt || lastGood.get(id).updatedAt;
       result.note += ' 保留上次模型目录；本轮模型与额度归属未核验。';
     }
-    if (history && result.id === 'antigravity') {
-      try { await history.record(result); }
+    if (history && SAMPLED.includes(result.id)) {
+      try { await recordHistory(result); }
       catch { result.historyWarning = '历史记录保存失败，消耗趋势暂不可用'; }
     }
     if (result.status !== 'stale' || !lastGood.has(id)) lastGood.set(id, structuredClone(result));
@@ -123,7 +148,14 @@ function gaugeFor(provider, { percent, balance, stale, pools }) {
   const provenance = ['error', 'disconnected', 'unsupported'].includes(provider.status) ? 'unknown' : stale ? 'stale' : 'live';
   const windows = (provider.windows?.length ? provider.windows : pools.flatMap(pool => pool.windows))
     .filter(w => Number.isFinite(w.remainingPercent))
-    .map(w => ({ label: { 300: '5 小时', 10080: '每周' }[w.windowDurationMins] || w.label || '窗口', remainingPercent: w.remainingPercent, resetsAt: w.resetsAt || null, reset: relativeReset(w.resetsAt) }))
+    .map(w => ({
+      label: { 300: '5 小时', 10080: '每周' }[w.windowDurationMins] || w.label || '窗口',
+      remainingPercent: w.remainingPercent,
+      resetsAt: w.resetsAt || null,
+      reset: relativeReset(w.resetsAt),
+      burnPerHour: !stale && Number.isFinite(w.burnPerHour) ? w.burnPerHour : null,
+      estimatedHoursLeft: !stale && Number.isFinite(w.estimatedHoursLeft) ? w.estimatedHoursLeft : null,
+    }))
     // The headline number is the tightest window, so windows[0] must be that window for its label and reset.
     .sort((a, b) => a.remainingPercent - b.remainingPercent);
   if (Number.isFinite(provider.remainingCredits) && Number.isFinite(provider.totalCredits) && provider.totalCredits > 0) {
@@ -199,7 +231,7 @@ function providerToUi(provider) {
       resetsAt: bucket.resetTime,
       reset: relativeReset(bucket.resetTime),
       burnPerHour: !stale && Number.isFinite(bucket.burnPerHour) ? bucket.burnPerHour : null,
-      samplingSupported: provider.id === 'antigravity',
+      samplingSupported: SAMPLED.includes(provider.id),
       estimatedHoursLeft: !stale ? bucket.estimatedHoursLeft : null,
     })),
   }));
