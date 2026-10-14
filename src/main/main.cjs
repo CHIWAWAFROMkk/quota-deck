@@ -26,13 +26,13 @@ const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) app.quit();
 
 app.on('second-instance', () => {
-  if (!window || window.isDestroyed()) { createWindow(); return; }
+  if (!window || window.isDestroyed()) { createWindow(true); return; }
   positionWindow();
   window.show();
   window.focus();
 });
 
-function createWindow() {
+function createWindow(showOnLoad = true) {
   window = new BrowserWindow({
     width: 520,
     height: 760,
@@ -85,9 +85,11 @@ function createWindow() {
   });
   window.webContents.once('did-finish-load', async () => {
     if (!window || window.isDestroyed()) return;
-    positionWindow();
-    window.show();
-    window.focus();
+    if (showOnLoad) {
+      positionWindow();
+      window.show();
+      window.focus();
+    }
     await refreshAll().catch(() => {});
   });
 }
@@ -102,7 +104,7 @@ function positionWindow() {
 }
 
 function toggleWindow() {
-  if (!window || window.isDestroyed()) { createWindow(); return; }
+  if (!window || window.isDestroyed()) { createWindow(true); return; }
   if (window.isVisible()) window.hide();
   else {
     positionWindow();
@@ -150,11 +152,12 @@ function createTray() {
   tray.setToolTip('QuotaDeck · AI 额度');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '显示额度', click: toggleWindow },
+    { label: '显示 HUD', type: 'checkbox', checked: hud?.isVisible() ?? true, click: (item) => { if (item.checked) hud?.show(); else hud?.hide(); } },
     { label: '刷新全部', click: () => { refreshAll().catch(() => {}); } },
     { label: '重新加载界面', click: () => {
       rendererRecoveries = [];
       tray.setToolTip('QuotaDeck · AI 额度');
-      if (!window || window.isDestroyed()) createWindow();
+      if (!window || window.isDestroyed()) createWindow(true);
       else { window.loadFile(rendererEntry).catch(() => {}); window.show(); }
     } },
     { type: 'separator' },
@@ -172,7 +175,7 @@ app.whenReady().then(() => {
     onRefresh: () => refreshAll(),
     onOpenPanel: showPanel,
   });
-  createWindow();
+  createWindow(!hud.isVisible());
   createTray();
   refreshTimer = setInterval(() => { refreshAll().catch(() => {}); }, 60_000);
 });
@@ -181,6 +184,7 @@ app.on('before-quit', () => {
   app.isQuiting = true;
   if (refreshTimer) clearInterval(refreshTimer);
   stopOwnedProcesses();
+  hud?.destroy();
 });
 
 app.on('window-all-closed', () => {});

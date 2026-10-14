@@ -18,7 +18,7 @@ function fixture({ version = '44.4.5', machine = 0x8664 } = {}) {
   fs.copyFileSync(path.join(root, 'docs/PORTABLE-README.md'), path.join(dir, 'docs/PORTABLE-README.md'));
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '1.2.3', devDependencies: { electron: '44.4.5' } }));
   fs.writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify({ packages: { '': { name: 'quota-deck', version: '1.2.3' }, 'node_modules/electron': { version: '44.4.5' } } }));
-  for (const name of ['compact.html', 'compact.css', 'compact.js']) fs.writeFileSync(path.join(dir, 'src/renderer', name), 'fixture');
+  for (const name of ['compact.html', 'compact.css', 'compact.js', 'hud.html', 'hud.css', 'hud.js']) fs.writeFileSync(path.join(dir, 'src/renderer', name), 'fixture');
   for (const name of ['LICENSE', 'README.md']) fs.writeFileSync(path.join(dir, name), 'fixture');
   fs.writeFileSync(path.join(dir, 'src/main/main.cjs'), 'fixture');
   const executable = Buffer.alloc(256);
@@ -55,6 +55,7 @@ test('packager prefers matching installed runtime and emits verifiable manifest 
   assert.equal(manifest.architecture, 'x64');
   assert.ok(manifest.files.some(file => file.path === 'resources/app/LICENSE'));
   assert.ok(manifest.files.some(file => file.path === 'resources/app/README.md'));
+  assert.ok(manifest.files.some(file => file.path === 'resources/app/src/renderer/hud.js'));
   for (const file of ['README.md', 'install-shortcuts.ps1', 'verify-package.ps1']) assert.ok(manifest.files.some(entry => entry.path === file));
   assert.equal(fs.readFileSync(path.join(output, 'install-shortcuts.ps1')).subarray(0, 3).toString('hex'), 'efbbbf');
   for (const file of manifest.files) {

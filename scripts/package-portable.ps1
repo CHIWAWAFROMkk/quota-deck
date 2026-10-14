@@ -61,7 +61,7 @@ $rendererRoot = Join-Path $sourceRoot 'renderer'
 New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'src\main') -Destination $sourceRoot -Recurse
 New-Item -ItemType Directory -Path $rendererRoot -Force | Out-Null
-foreach ($rendererFile in @('compact.html', 'compact.css', 'compact.js')) {
+foreach ($rendererFile in @('compact.html', 'compact.css', 'compact.js', 'hud.html', 'hud.css', 'hud.js')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot (Join-Path 'src\renderer' $rendererFile)) -Destination $rendererRoot
 }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'assets') -Destination $appRoot -Recurse
