@@ -28,6 +28,14 @@ source.readAll = async () => {
   return data;
 };
 source.readProvider = async id => data.providers.find(provider => provider.id === id);
+const tokenModule = require(path.join(root, 'src/main/token-ledger.cjs'));
+const tokenStart = tokenModule.windowStart(now);
+const tokenFixture = {
+  claude: { status: 'ok', buckets: Array.from({ length: 96 }, (_, i) => (i % 7 === 0 ? 1000 + i * 10 : 0)), total: 0, startAt: tokenStart, partial: false },
+  codex: { status: 'unsupported', buckets: new Array(96).fill(0), total: 0, startAt: tokenStart, partial: false },
+};
+tokenFixture.claude.total = tokenFixture.claude.buckets.reduce((a, b) => a + b, 0);
+tokenModule.createTokenLedger = () => ({ read: async () => tokenFixture });
 const orchestrator = require(path.join(root, 'src/main/orchestrator.cjs'));
 const realRun = orchestrator.runCollaboration;
 let completeFixture;
@@ -48,8 +56,10 @@ async function until(fn) {
   throw new Error('Timed out waiting for UI');
 }
 app.whenReady().then(async () => {
-  await until(() => BrowserWindow.getAllWindows().length > 0);
-  const window = BrowserWindow.getAllWindows()[0];
+  const byPage = name => BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith(name));
+  await until(() => byPage('compact.html') && byPage('hud.html'));
+  const window = byPage('compact.html');
+  const hudWindow = byPage('hud.html');
   const evaluate = code => window.webContents.executeJavaScript(code);
   await until(async () => !window.webContents.isLoading() && await evaluate('document.querySelectorAll(".provider").length === 5'));
   assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
@@ -100,6 +110,31 @@ app.whenReady().then(async () => {
   assert.equal(await alien.webContents.executeJavaScript('quotaDeck.refreshAll().then(()=>false,()=>true)'), true);
   alien.destroy();
   checks.push('other window IPC denied');
+  const hudEval = code => hudWindow.webContents.executeJavaScript(code);
+  await until(async () => !hudWindow.webContents.isLoading() && await hudEval('document.querySelectorAll("#strip .item").length === 5'));
+  assert.equal(hudWindow.isAlwaysOnTop(), true);
+  assert.equal(hudWindow.webContents.getLastWebPreferences().sandbox, true);
+  assert.equal(await hudEval('typeof require === "undefined" && typeof process === "undefined"'), true);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#strip .item")].map(b => b.dataset.id)'), ['codex', 'claude', 'antigravity', 'deepseek', 'workbuddy']);
+  await until(() => hudEval('[...document.querySelectorAll("#strip img")].every(img => img.complete && img.naturalWidth > 0)'));
+  assert.equal(await hudEval('document.querySelector("[data-id=codex] .ring").classList.contains("high")'), true);
+  assert.equal(await hudEval('document.querySelector("[data-id=antigravity] .ring .value") === null'), true);
+  await hudEval(`(() => { const b = document.querySelector('[data-id=claude]');
+    b.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10 }));
+    b.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true, screenX: 10, screenY: 10 })); })()`);
+  await until(() => hudEval('!document.querySelector("#card").hidden && document.querySelectorAll("#card .row").length === 2'));
+  assert.ok(await hudEval('document.querySelectorAll("#card .chart rect").length') > 0);
+  assert.equal(await hudEval('/NaN|undefined/.test(document.querySelector("#card").innerText)'), false);
+  await hudEval('document.querySelector("#card .row").click()');
+  assert.match(await hudEval('document.querySelector("#card .row-value").textContent'), /%\/h|采样中/);
+  await hudEval('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+  assert.equal(await hudEval('document.querySelector("#card").hidden'), true);
+  fs.writeFileSync(path.join(output, 'hud.png'), (await hudWindow.webContents.capturePage()).toPNG());
+  const alienHud = new BrowserWindow({ show: false, webPreferences: { preload: path.join(root, 'src/main/preload-hud.cjs'), contextIsolation: true, sandbox: true } });
+  await alienHud.loadFile(path.join(root, 'src/renderer/hud.html'));
+  assert.equal(await alienHud.webContents.executeJavaScript('hud.refresh().then(()=>false,()=>true)'), true);
+  alienHud.destroy();
+  checks.push('HUD: five rings with logos, click card with tokens, rate toggle, Esc, sandbox, IPC origin');
   await evaluate("void quotaDeck.runCollaboration({task:'fixture crash recovery',agents:['codex','claude']}).catch(()=>{}); true");
   await until(() => Boolean(completeFixture));
   const crashed = new Promise(resolve => window.webContents.once('render-process-gone', resolve));

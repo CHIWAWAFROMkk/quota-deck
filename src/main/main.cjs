@@ -6,6 +6,9 @@ const { runCollaboration, stopOwnedProcesses } = require('./orchestrator.cjs');
 const { isTrustedRenderer, validateProviderId } = require('./security.cjs');
 const { connect: connectClaudeStatusLine, disconnect: disconnectClaudeStatusLine } = require('./claude-statusline-chain.cjs');
 const { nodePath } = require('./local-paths.cjs');
+const { buildHudItems } = require('./hud-view.cjs');
+const { createHud } = require('./hud-window.cjs');
+const { createTokenLedger } = require('./token-ledger.cjs');
 const rendererEntry = path.join(__dirname, '..', 'renderer', 'compact.html');
 const providerIds = ['codex', 'claude', 'antigravity', 'deepseek', 'workbuddy'];
 
@@ -16,6 +19,8 @@ let refreshPending = null;
 let collaborationPending = false;
 let collaborationState = { running: false, result: null, error: null };
 let rendererRecoveries = [];
+let hud = null;
+let tokenLedger = null;
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) app.quit();
@@ -106,6 +111,13 @@ function toggleWindow() {
   }
 }
 
+function showPanel() {
+  if (!window || window.isDestroyed()) { createWindow(true); return; }
+  positionWindow();
+  window.show();
+  window.focus();
+}
+
 async function refreshAll() {
   if (refreshPending) return refreshPending;
   refreshPending = performRefresh().finally(() => { refreshPending = null; });
@@ -115,6 +127,8 @@ async function refreshAll() {
 async function performRefresh() {
   const snapshot = await readAll();
   if (window && !window.isDestroyed()) window.webContents.send('quota:snapshot', snapshot);
+  hud?.pushState(buildHudItems(snapshot));
+  tokenLedger?.read().then(tokens => hud?.pushTokens(tokens)).catch(() => {});
   return snapshot;
 }
 
@@ -152,6 +166,12 @@ function createTray() {
 app.whenReady().then(() => {
   if (!singleInstanceLock) return;
   configureHistory(path.join(app.getPath('userData'), 'quota-history.json'));
+  tokenLedger = createTokenLedger();
+  hud = createHud({
+    settingsPath: path.join(app.getPath('userData'), 'hud-settings.json'),
+    onRefresh: () => refreshAll(),
+    onOpenPanel: showPanel,
+  });
   createWindow();
   createTray();
   refreshTimer = setInterval(() => { refreshAll().catch(() => {}); }, 60_000);
