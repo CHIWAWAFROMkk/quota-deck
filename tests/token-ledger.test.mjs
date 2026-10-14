@@ -113,10 +113,10 @@ test('events land in the right quarter hour, and missing roots are unsupported',
 import fsp from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 
-function wrapFs(clock, { readCost = 0, readdirCost = () => 0, failOpen = () => false } = {}) {
+function wrapFs(clock, { readCost = 0, readdirCost = () => 0, statCost = () => 0, failOpen = () => false } = {}) {
   return {
     readdir: async (...args) => { clock.now += readdirCost(); return fsp.readdir(...args); },
-    stat: (...args) => fsp.stat(...args),
+    stat: async (...args) => { clock.now += statCost(); return fsp.stat(...args); },
     open: async (...args) => {
       if (failOpen()) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
       const handle = await fsp.open(...args);
@@ -204,4 +204,34 @@ process.stdout.write(JSON.stringify({ start: l.windowStart(now), offset: new Dat
   const result = JSON.parse(run.stdout);
   assert.equal(result.offset, 480, 'TZ must take effect for this check to mean anything');
   assert.equal(result.start, Date.parse('2026-11-01T09:00:00Z') - 95 * QUARTER);
+});
+
+test('the directory scan checks the deadline before every stat and still makes progress', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  for (let i = 0; i < 8; i++) await writeFile(path.join(claudeRoot, 'proj', `f${i}.jsonl`), claudeLine(`m${i}`, now - 1000, { output_tokens: 1 }) + '\n');
+  const clock = { now: 0 };
+  let stats = 0;
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot, budgetMs: 2000, clock: () => clock.now, fileSystem: wrapFs(clock, { statCost: () => (stats++, 1000) }) });
+  const first = await reader.read(now);
+  assert.ok(stats <= 3, `stat kept going past the deadline: ${stats}`);
+  assert.equal(first.claude.partial, true);
+  assert.ok(first.claude.total >= 1, 'each round parses at least one file');
+});
+
+test('a file truncated after a budget-interrupted read is reread', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  const file = path.join(claudeRoot, 'proj', 'big.jsonl');
+  await writeFile(file, Array.from({ length: 40 }, (_, i) => claudeLine(`m${i}`, now - 1000, { output_tokens: 20 })).join('\n') + '\n');
+  const clock = { now: 0 };
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot, chunkSize: 256, budgetMs: 2000, clock: () => clock.now, fileSystem: wrapFs(clock, { readCost: 1500 }) });
+  const first = await reader.read(now);
+  assert.equal(first.claude.partial, true);
+  assert.ok(first.claude.total > 0);
+  await writeFile(file, claudeLine('c', now - 500, { output_tokens: 3 }) + '\n');
+  let result = await reader.read(now);
+  for (let i = 0; i < 5 && result.claude.partial; i++) result = await reader.read(now);
+  assert.equal(result.claude.partial, false);
+  assert.equal(result.claude.total, 3);
 });

@@ -58,6 +58,7 @@ async function listRecentJsonl(root, since, fileSystem, isLate) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { if (depth < MAX_DEPTH) await walk(full, depth + 1); continue; }
       if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      if (isLate()) { complete = false; return; }
       try {
         const stat = await fileSystem.stat(full);
         if (stat.mtimeMs >= since) found.push({ file: full, stat });
@@ -159,18 +160,27 @@ function createTokenLedger({
     if (scan.complete) statuses[id] = 'ok';
     let partial = !scan.complete;
     const alive = new Set();
+    let progressed = false;
     for (const { file, stat } of scan.found) {
       alive.add(file);
-      if (isLate()) { partial = true; continue; } // keep what earlier rounds parsed
       const previous = known.get(file);
-      // A file smaller than last time (even with a trailing partial line) or older was rewritten.
-      const state = previous && stat.size >= previous.size && stat.mtimeMs >= previous.mtimeMs ? previous : source.fresh();
+      // A file smaller than last time or than what was read (even with a trailing partial line), or older, was rewritten.
+      const unchanged = previous && stat.size >= previous.size && stat.size >= previous.offset && stat.mtimeMs >= previous.mtimeMs;
+      if (unchanged && previous.done && stat.size === previous.size) continue; // nothing new since a complete read
+      // Past the deadline, still read one file per round so a slow disk cannot stall the count forever.
+      if (isLate() && progressed) { partial = true; continue; } // keep what earlier rounds parsed
+      progressed = true;
+      const state = unchanged ? previous : source.fresh();
       const stage = source.stage(state);
       try {
         const { offset, done } = await readLines(file, state.offset, stat.size, fileSystem, line => source.take(stage, line), { chunkSize, isLate });
         source.commit(state, stage);
         state.offset = offset;
-        if (done) { state.size = stat.size; state.mtimeMs = stat.mtimeMs; } else partial = true;
+        // Record the size seen even after a partial read, so a later truncation is still noticed.
+        state.size = stat.size;
+        state.mtimeMs = stat.mtimeMs;
+        state.done = done;
+        if (!done) partial = true;
         source.prune(state, startAt);
         known.set(file, state);
       } catch {
