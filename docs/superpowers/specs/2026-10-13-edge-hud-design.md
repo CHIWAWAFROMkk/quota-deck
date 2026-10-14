@@ -71,7 +71,8 @@ assets/logos/*.svg      新：Lobe Icons 的 Claude、OpenAI(Codex)、Antigravit
 - 颜色按已用比例：`< 70%` 绿，`≥ 70%` 黄，`≥ 90%` 红。余额制的颜色取服务商状态（healthy 绿 / critical 红）。
 - 旧快照（`gauge.provenance === 'stale'`）：圆环改为虚线，整项透明度 0.55。
 - 尺寸：圆环直径 22px，描边 1.5px，logo 为直径的 0.6，离屏幕边 3px。贴左/右边时竖排、数字在 logo 内侧且右对齐；贴上/下边时横排。
-- 外观：深色半透明底 `rgba(20,20,24,0.78)` + `backdrop-filter: blur(20px)`，1px 发丝边 `rgba(255,255,255,0.08)`，圆角 = 条宽一半。
+- 收起时只画圆环；指针进入浮条后，浮条向屏幕内侧展开，每个圆环旁出现数字（视频 1s 与 4s 两帧的差别），离开 250ms 后收回。
+- 外观：深色底 `rgba(18,18,22,0.9)`，1px 发丝边 `rgba(255,255,255,0.09)`，圆角 = 条宽一半。方案 A 的窗口比浮条大得多，CSS `backdrop-filter` 模糊不到窗口后的桌面，Windows 亚克力材质又会铺满整个透明窗口，所以用近乎不透明的深色底模拟视频里的玻璃条。
 
 ### 5.2 悬停一行（胶囊）
 
@@ -95,9 +96,9 @@ assets/logos/*.svg      新：Lobe Icons 的 Claude、OpenAI(Codex)、Antigravit
 - 持久化到 `userData/hud-settings.json`：`{ displayId, edge, offset, visible }`。启动时该显示器不存在则回落到主显示器右边、offset 0.3。
 - 只有一个 HUD，跟随用户拖到的显示器。显示器变化（插拔、分辨率改变）时重新计算位置。
 
-### 5.5 托盘
+### 5.5 托盘与启动
 
-托盘菜单新增「显示 HUD / 隐藏 HUD」（勾选项，持久化 `visible`）。原「显示额度」仍打开大面板。
+托盘菜单新增「显示 HUD」勾选项（持久化 `visible`）。原「显示额度」仍打开大面板。HUD 可见时，启动不再自动弹出大面板；HUD 隐藏时保持原来的启动行为。
 
 ## 6. 数据
 
@@ -105,7 +106,7 @@ assets/logos/*.svg      新：Lobe Icons 的 Claude、OpenAI(Codex)、Antigravit
 
 - 每次刷新都重新读 `~/.claude/.credentials.json`（Claude Code 自己续期改写它），只读，取 `claudeAiOauth.accessToken` 与 `subscriptionType`。
 - 用 Electron `net.fetch` 请求 `GET https://api.anthropic.com/api/oauth/usage`，头部 `Authorization: Bearer …`、`anthropic-beta: oauth-2025-04-20`，15 秒超时。`net.fetch` 走 Chromium 网络栈，自动跟随系统代理（Clash Verge 系统代理模式）。
-- 解析：返回 JSON 里每个形如 `{ utilization: number, resets_at: string }` 的顶层字段都算一个窗口。已知标签 `five_hour`→「5 小时」、`seven_day`→「每周」、`seven_day_opus`→「每周 · Opus」、`seven_day_sonnet`→「每周 · Sonnet」，其他沿用字段名。没有 `five_hour` 视为解析失败。
+- 解析：只把名字以 `five_hour` / `seven_day` 开头、形如 `{ utilization: number, resets_at: string }` 的顶层字段当作窗口（`extra_usage` 等不是额度窗口，不进圆环）。已知标签 `five_hour`→「5 小时」、`seven_day`→「每周」、`seven_day_opus`→「每周 · Opus」、`seven_day_sonnet`→「每周 · Sonnet」，其他沿用字段名。没有 `five_hour` 视为解析失败。
 - 输出与现有 `normalizeClaudeSnapshot` 相同结构（`windows`、`groups.buckets`、`remainingPercent`、`status`），`source` 写「Claude 官方用量接口」，`plan` 写套餐名。
 - 失败处理：401 → note「登录令牌过期，在 Claude Code 里发一条消息即可续期」；429 → 本轮跳过，下一次刷新间隔翻倍（上限 15 分钟），成功后恢复；网络错误 → 回退读状态栏桥快照（按其原规则标旧）。凭证缺失 → 回退状态栏桥。
 - 令牌只在主进程内存中使用，不进入快照、历史、日志、错误信息。
@@ -153,8 +154,8 @@ assets/logos/*.svg      新：Lobe Icons 的 Claude、OpenAI(Codex)、Antigravit
 
 ## 9. 不做（本期）
 
-事件卡片与 hooks、会话列表、Bot 动画、光晕、刘海/动态形态、多屏各一个 HUD、HUD 设置界面（尺寸等先用默认值，设置文件可手改）、iPhone/远程。
+事件卡片与 hooks、会话列表、Bot 动画（与会话状态一起放第二期）、光晕（原版简约形态本就没有）、刘海/动态形态、多屏各一个 HUD（当前只有一块屏幕，接第二块屏再加）、HUD 设置界面（尺寸等先用默认值，设置文件可手改）、iPhone/远程。
 
 ## 10. 第三方素材
 
-logo 来自 Lobe Icons（MIT），随 `assets/logos/LICENSE-lobe-icons.txt` 一起提交，并在大面板「软件与数据说明」里注明。交互设计参考 Agent HUD（Apache-2.0），不复制其源码。
+logo 来自 Lobe Icons（MIT；WorkBuddy 没有单独图标，用同属腾讯系的 CodeBuddy 图标），随 `assets/logos/LICENSE-lobe-icons.txt` 一起提交，并在大面板「软件与数据说明」里注明。交互设计参考 Agent HUD（Apache-2.0），不复制其源码。
