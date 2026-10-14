@@ -235,3 +235,18 @@ test('a file truncated after a budget-interrupted read is reread', async () => {
   assert.equal(result.claude.partial, false);
   assert.equal(result.claude.total, 3);
 });
+
+test('a slow scan resumes where it stopped, so every file is counted once within a few rounds', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  for (let i = 0; i < 8; i++) await writeFile(path.join(claudeRoot, 'proj', `f${i}.jsonl`), claudeLine(`m${i}`, now - 1000, { output_tokens: 1 }) + '\n');
+  const clock = { now: 0 };
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot, budgetMs: 2000, clock: () => clock.now, fileSystem: wrapFs(clock, { statCost: () => 1000 }) });
+  const totals = [];
+  for (let round = 0; round < 10; round++) {
+    const result = await reader.read(now);
+    totals.push(result.claude.total);
+    assert.ok(result.claude.total <= 8, `round ${round + 1} double counted: ${totals.join(' → ')}`);
+  }
+  assert.equal(totals.at(-1), 8, `never reached all eight files: ${totals.join(' → ')}`);
+});

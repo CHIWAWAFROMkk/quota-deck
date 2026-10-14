@@ -45,42 +45,20 @@ function keepFullest(map, event) {
   if (!known || event.tokens >= known.tokens) map.set(event.id, event);
 }
 
-async function listRecentJsonl(root, since, fileSystem, isLate) {
-  const found = [];
-  let complete = true;
-  async function walk(dir, depth) {
-    if (isLate()) { complete = false; return; }
-    let entries;
-    try { entries = await fileSystem.readdir(dir, { withFileTypes: true }); }
-    catch (error) { if (depth === 0) throw error; return; }
-    for (const entry of entries) {
-      if (!complete) return;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) { if (depth < MAX_DEPTH) await walk(full, depth + 1); continue; }
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      if (isLate()) { complete = false; return; }
-      try {
-        const stat = await fileSystem.stat(full);
-        if (stat.mtimeMs >= since) found.push({ file: full, stat });
-      } catch { /* deleted between readdir and stat */ }
-    }
-  }
-  await walk(root, 0);
-  return { found, complete };
-}
-
 // Reads complete lines from `from`; a trailing partial line waits for the next read.
-// Stops between chunks once the round is late; `done` says whether it reached `size`.
+// Stops between chunks once the round is late; `done` says whether it reached `size`,
+// `shrunk` that the file ended before `size` (it was rewritten since that size was seen).
 async function readLines(file, from, size, fileSystem, onLine, { chunkSize, isLate }) {
-  if (size <= from) return { offset: from, done: true };
+  if (size <= from) return { offset: from, done: true, shrunk: false };
   const handle = await fileSystem.open(file, 'r');
   try {
     let position = from;
     let carry = Buffer.alloc(0);
+    let shrunk = false;
     while (position < size) {
       const chunk = Buffer.alloc(Math.min(chunkSize, size - position));
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
-      if (!bytesRead) break;
+      if (!bytesRead) { shrunk = true; break; }
       position += bytesRead;
       const data = carry.length ? Buffer.concat([carry, chunk.subarray(0, bytesRead)]) : chunk.subarray(0, bytesRead);
       let start = 0;
@@ -91,7 +69,7 @@ async function readLines(file, from, size, fileSystem, onLine, { chunkSize, isLa
       carry = Buffer.from(data.subarray(start));
       if (position < size && isLate()) break;
     }
-    return { offset: position - carry.length, done: position >= size };
+    return { offset: position - carry.length, done: position >= size, shrunk };
   } finally {
     await handle.close();
   }
@@ -135,6 +113,11 @@ function emptySeries(status, startAt) {
   return { status, buckets: new Array(BUCKETS).fill(0), total: 0, startAt, partial: false };
 }
 
+// A file needs reading when it is new, changed since its last complete read, or was only partly read.
+function needsRead(state, stat) {
+  return !state || !state.done || stat.size !== state.size || stat.mtimeMs !== state.mtimeMs;
+}
+
 function createTokenLedger({
   claudeRoot = path.join(os.homedir(), '.claude', 'projects'),
   codexRoot = path.join(os.homedir(), '.codex', 'sessions'),
@@ -143,56 +126,104 @@ function createTokenLedger({
   chunkSize = CHUNK,
   clock = Date.now,
 } = {}) {
-  const roots = { claude: claudeRoot, codex: codexRoot };
-  const files = { claude: new Map(), codex: new Map() };
-  const statuses = { claude: 'ok', codex: 'ok' };
+  // Per source: parsed files, files waiting to be read, and a directory scan that may span several rounds.
+  const sources = {
+    claude: { root: claudeRoot, known: new Map(), pending: new Map(), scan: null, status: 'ok' },
+    codex: { root: codexRoot, known: new Map(), pending: new Map(), scan: null, status: 'ok' },
+  };
   let pending = null;
 
-  async function readSource(id, startAt, isLate) {
-    const source = SOURCES[id];
-    const known = files[id];
-    let scan;
-    try { scan = await listRecentJsonl(roots[id], startAt, fileSystem, isLate); }
-    catch (error) {
-      if (error?.code === 'ENOENT') { known.clear(); statuses[id] = 'unsupported'; return emptySeries('unsupported', startAt); }
-      return emptySeries('error', startAt); // keep what is known for the next round
+  // Continue the current scan pass until late. Returns true when the pass reached its end,
+  // so files missing from it can be forgotten; the next round then starts a new pass.
+  async function scanStep(src, since, isLate) {
+    if (!src.scan) src.scan = { queue: [{ dir: src.root, depth: 0 }], seen: new Set() };
+    const scan = src.scan;
+    while (scan.queue.length) {
+      if (isLate()) return false;
+      const item = scan.queue.shift();
+      if (item.dir) {
+        let entries;
+        try { entries = await fileSystem.readdir(item.dir, { withFileTypes: true }); }
+        catch (error) { if (item.depth === 0) { src.scan = null; throw error; } continue; }
+        const next = [];
+        for (const entry of entries) {
+          const full = path.join(item.dir, entry.name);
+          if (entry.isDirectory()) { if (item.depth < MAX_DEPTH) next.push({ dir: full, depth: item.depth + 1 }); }
+          else if (entry.isFile() && entry.name.endsWith('.jsonl')) next.push({ file: full });
+        }
+        scan.queue.unshift(...next);
+        continue;
+      }
+      let stat;
+      try { stat = await fileSystem.stat(item.file); } catch { continue; } // deleted since readdir
+      if (stat.mtimeMs < since) continue;
+      scan.seen.add(item.file);
+      if (needsRead(src.known.get(item.file), stat)) src.pending.set(item.file, stat);
     }
-    if (scan.complete) statuses[id] = 'ok';
-    let partial = !scan.complete;
-    const alive = new Set();
-    let progressed = false;
-    for (const { file, stat } of scan.found) {
-      alive.add(file);
-      const previous = known.get(file);
+    for (const file of [...src.known.keys()]) if (!scan.seen.has(file)) src.known.delete(file);
+    for (const file of [...src.pending.keys()]) if (!scan.seen.has(file)) src.pending.delete(file);
+    src.scan = null;
+    return true;
+  }
+
+  // Read waiting files, oldest first. Past the deadline one file per round is still read,
+  // so a slow disk cannot stall the count forever.
+  async function readPending(source, src, startAt, isLate, round) {
+    for (const [file, stat] of [...src.pending]) {
+      if (isLate() && round.progressed) return;
+      round.progressed = true;
+      const previous = src.known.get(file);
       // A file smaller than last time or than what was read (even with a trailing partial line), or older, was rewritten.
-      const unchanged = previous && stat.size >= previous.size && stat.size >= previous.offset && stat.mtimeMs >= previous.mtimeMs;
-      if (unchanged && previous.done && stat.size === previous.size) continue; // nothing new since a complete read
-      // Past the deadline, still read one file per round so a slow disk cannot stall the count forever.
-      if (isLate() && progressed) { partial = true; continue; } // keep what earlier rounds parsed
-      progressed = true;
-      const state = unchanged ? previous : source.fresh();
+      const continues = previous && stat.size >= previous.size && stat.size >= previous.offset && stat.mtimeMs >= previous.mtimeMs;
+      const state = continues ? previous : source.fresh();
       const stage = source.stage(state);
       try {
-        const { offset, done } = await readLines(file, state.offset, stat.size, fileSystem, line => source.take(stage, line), { chunkSize, isLate });
+        const { offset, done, shrunk } = await readLines(file, state.offset, stat.size, fileSystem, line => source.take(stage, line), { chunkSize, isLate });
+        if (shrunk) {
+          // Rewritten since it was queued: drop it; the scan finds it again with its new size.
+          src.known.delete(file);
+          src.pending.delete(file);
+          continue;
+        }
         source.commit(state, stage);
         state.offset = offset;
         // Record the size seen even after a partial read, so a later truncation is still noticed.
         state.size = stat.size;
         state.mtimeMs = stat.mtimeMs;
         state.done = done;
-        if (!done) partial = true;
         source.prune(state, startAt);
-        known.set(file, state);
+        src.known.set(file, state);
+        if (done) src.pending.delete(file);
       } catch {
-        partial = true; // the last good state stays; the next round retries from its offset
+        // The last good state stays and the file stays pending for the next round.
       }
     }
-    if (scan.complete) for (const file of [...known.keys()]) if (!alive.has(file)) known.delete(file);
-    const series = emptySeries(statuses[id], startAt);
-    series.partial = partial;
+  }
+
+  async function readSource(id, startAt, deadline) {
+    const source = SOURCES[id];
+    const src = sources[id];
+    const isLate = () => clock() > deadline;
+    const round = { progressed: false };
+    await readPending(source, src, startAt, isLate, round);
+    let complete;
+    try { complete = await scanStep(src, startAt, isLate); }
+    catch (error) {
+      if (error?.code === 'ENOENT') {
+        src.known.clear();
+        src.pending.clear();
+        src.status = 'unsupported';
+        return emptySeries('unsupported', startAt);
+      }
+      return emptySeries('error', startAt); // keep what is known for the next round
+    }
+    if (complete) src.status = 'ok';
+    await readPending(source, src, startAt, isLate, round);
+    const series = emptySeries(src.status, startAt);
+    series.partial = !complete || src.pending.size > 0;
     const merged = new Map();
     const plain = [];
-    for (const state of known.values()) {
+    for (const state of src.known.values()) {
       for (const event of source.events(state)) {
         if (event.id) keepFullest(merged, event);
         else plain.push(event);
@@ -207,11 +238,13 @@ function createTokenLedger({
     return series;
   }
 
+  // Each source gets half the budget, so one slow source cannot starve the other.
   async function read(now = clock()) {
     const startAt = windowStart(now);
-    const deadline = clock() + budgetMs;
-    const isLate = () => clock() > deadline;
-    return { claude: await readSource('claude', startAt, isLate), codex: await readSource('codex', startAt, isLate) };
+    const share = budgetMs / 2;
+    const claude = await readSource('claude', startAt, clock() + share);
+    const codex = await readSource('codex', startAt, clock() + share);
+    return { claude, codex };
   }
 
   return {
