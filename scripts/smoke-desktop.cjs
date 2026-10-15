@@ -12,7 +12,7 @@ const oauth = require(path.join(root, 'src/main/claude-oauth.cjs'));
 const now = Date.now();
 const updatedAt = new Date(now).toISOString();
 const iso = minutes => new Date(now + minutes * 60000).toISOString();
-const claudeRaw = oauth.parseUsage({ five_hour: { utilization: 12, resets_at: iso(72) }, seven_day: { utilization: 79, resets_at: iso(4 * 1440 + 627) }, seven_day_opus: { utilization: 60, resets_at: iso(4 * 1440 + 627) } }, 'max_20x', now);
+const claudeRaw = oauth.parseUsage({ five_hour: { utilization: 12, resets_at: iso(72.5) }, seven_day: { utilization: 79, resets_at: iso(4 * 1440 + 627) }, seven_day_opus: { utilization: 60, resets_at: iso(4 * 1440 + 627) } }, 'max_20x', now);
 [6.3, 1.4, 0.8].forEach((rate, i) => { claudeRaw.groups[0].buckets[i].burnPerHour = rate; });
 const data = { providers: [
   { id: 'codex', name: 'Codex', status: 'healthy', precision: 'provider-reported', planType: 'pro', updatedAt, remainingPercent: 51, windows: [{ label: '5h', remainingPercent: 51, windowDurationMins: 300, resetsAt: iso(150) }, { label: 'week', remainingPercent: 70, windowDurationMins: 10080, resetsAt: iso(3000) }], models: [] },
@@ -98,6 +98,50 @@ app.whenReady().then(async () => {
   assert.equal(await alienHud.webContents.executeJavaScript('hud.setSettings({ size: 40 }).then(()=>false,()=>true)'), true);
   alienHud.destroy();
   checks.push('HUD IPC origin enforced');
+  await click('claude');
+  await until(() => hudEval('document.querySelector("#card").classList.contains("shown") && document.querySelectorAll("#card .row").length === 3'));
+  await sleep(500);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .row .name")].map(n => n.textContent)'), ['Current session', 'Weekly', 'Weekly limit · Opus']);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .row .value")].map(n => n.textContent)'), ['12%', '79%', '60%']);
+  assert.equal(await hudEval('document.querySelector("#card .row .detail").textContent'), '1h 12m');
+  assert.equal(await hudEval('document.querySelector("#card .account .plan").textContent'), 'Max x20');
+  assert.equal(await hudEval('document.querySelector("#card .account .status").textContent'), 'Current account');
+  assert.equal(await hudEval('document.querySelector("#card").offsetWidth'), 440);
+  assert.equal(await hudEval('Math.round(document.querySelector("#strip").getBoundingClientRect().left - document.querySelector("#card").getBoundingClientRect().right)'), 6);
+  assert.equal(await hudEval('/NaN|undefined/.test(document.querySelector("#card").innerText)'), false);
+  await shot('hud-card-quota');
+
+  await hudEval('document.querySelector("#card [data-metric=burn]").click()');
+  await until(() => hudEval('document.querySelector("#card .row .value").textContent === "6.3%/h"'));
+  assert.equal(await hudEval('document.querySelector("#card .row .detail").textContent'), '20% by reset');
+  assert.equal(await hudEval('document.querySelectorAll("#card .row .track .ghost").length > 0'), true);
+  await until(async () => (await hudEval('hud.initial()')).settings.metrics.claude === 'burn');
+  await shot('hud-card-burn');
+  await hudEval('document.querySelector("#card [data-metric=tokens]").click()');
+  await until(() => hudEval('/\\/h$/.test(document.querySelector("#card .row .value").textContent)'));
+  assert.match(await hudEval('document.querySelector("#card .row .detail").textContent'), / \/ day$/);
+  await hudEval('document.querySelector("#card [data-metric=quota]").click()');
+  await until(() => hudEval('document.querySelector("#card .row .value").textContent === "12%"'));
+  checks.push('card: video rows and layout, three metrics persisted per provider');
+
+  assert.match(await hudEval('document.querySelector("#card .tokens .sec-meta").textContent'), /^24h · [\d.]+[KMB]? tok$/);
+  await until(() => hudEval('document.querySelectorAll("#card .chart .col rect").length > 0'));
+  await hudEval(`(() => { const svg = document.querySelector('#card .chart svg'); const r = svg.getBoundingClientRect();
+    svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: r.left + r.width * (27.5 / 96), clientY: r.top + 10 })); })()`);
+  await until(() => hudEval('!document.querySelector("#card .chart-tip").hidden'));
+  assert.match(await hudEval('document.querySelector("#card .tip-period").textContent'), /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{1,2} [A-Z][a-z]{2} at \d\d:\d\d – \d\d:\d\d$/);
+  assert.match(await hudEval('document.querySelector("#card .tip-total").textContent'), /^[\d,]+ tokens$/);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .tip-row .tip-name")].map(n => n.textContent)'), ['Opus 5.5', 'Fable 5.1']);
+  await shot('hud-tooltip');
+  checks.push('tokens: stacked by model, hover tooltip with period, total and models');
+
+  await hudEval('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+  await until(() => hudEval('document.querySelector("#card").hidden'));
+  await click('codex');
+  await until(() => hudEval('document.querySelector("#card .tokens .sec-meta")?.textContent === "No local logs"'));
+  await click('codex');
+  await until(() => hudEval('document.querySelector("#card").hidden'));
+  checks.push('card closes on Esc and on a second click; missing logs are labelled');
   // <<more checks>>
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ electron: process.versions.electron, checks }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, output, electron: process.versions.electron }));
