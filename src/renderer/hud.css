@@ -115,4 +115,24 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .foot-btn:hover { background: rgba(245, 245, 247, 0.06); }
 .foot-btn .icon-svg { width: 14px; height: 14px; }
 
+/* Settings page inside the card. */
+.back { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--text-2); }
+.back:hover { background: rgba(245, 245, 247, 0.06); }
+.back .icon-svg { width: 12px; height: 12px; }
+.set { gap: 4px; }
+.set h3 { margin: 0 0 2px; padding: 0 6px; font-size: 11px; font-weight: 600; color: var(--text-2); }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; padding: 0 6px; font-size: 13px; }
+.set-slider, .set-actions { display: flex; align-items: center; gap: 8px; }
+.set-value { width: 28px; text-align: right; font-size: 12px; color: var(--text-2); }
+.set-note { font-size: 12px; color: var(--text-2); }
+.slider { width: 140px; margin: 0; accent-color: var(--ok); }
+.switch { appearance: none; position: relative; width: 30px; height: 18px; margin: 0; border-radius: 9px; background: rgba(255, 255, 255, 0.18); transition: background 0.2s var(--ease); }
+.switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform 0.2s var(--ease); }
+.switch:checked { background: var(--ok); }
+.switch:checked::after { transform: translateX(12px); }
+.btn { padding: 3px 10px; border-radius: 6px; background: rgba(245, 245, 247, 0.12); font-size: 12px; white-space: nowrap; }
+.btn:hover { background: rgba(245, 245, 247, 0.18); }
+.btn:disabled { opacity: 0.5; }
+.set-status { min-height: 16px; margin: 0; padding: 0 6px; font-size: 11px; color: var(--text-2); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

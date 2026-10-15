@@ -43,7 +43,13 @@
       card.refresh();
       window.hud.setSettings({ metrics: { [id]: metric } }).catch(() => {});
     },
-    settingsView: null,
+    settingsView: ({ back }) => window.HudSettings.view({
+      settings,
+      items,
+      back,
+      onChange: patch => window.hud.setSettings(patch).catch(() => {}),
+      onAction: name => window.hud.action(name),
+    }),
     onOpenStats: () => { window.hud.openStats().catch(() => {}); },
     onChange: scheduleHits,
   });
