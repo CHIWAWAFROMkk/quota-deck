@@ -7,12 +7,15 @@ const { nodePath } = require('./local-paths.cjs');
 const { buildHudItems, buildHudTokens } = require('./hud-view.cjs');
 const { createHud } = require('./hud-window.cjs');
 const { createTokenLedger } = require('./token-ledger.cjs');
+const { createStats } = require('./stats-window.cjs');
 
 let tray = null;
 let refreshTimer = null;
 let refreshPending = null;
 let hud = null;
 let tokenLedger = null;
+let stats = null;
+let lastTokens = null;
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) app.quit();
@@ -28,7 +31,11 @@ async function refreshAll() {
 async function performRefresh() {
   const snapshot = await readAll();
   hud?.pushState(buildHudItems(snapshot));
-  tokenLedger?.read().then(tokens => hud?.pushTokens(buildHudTokens(tokens))).catch(() => {});
+  tokenLedger?.read().then(tokens => {
+    lastTokens = buildHudTokens(tokens);
+    hud?.pushTokens(lastTokens);
+    stats?.push(lastTokens);
+  }).catch(() => {});
   return snapshot;
 }
 
@@ -85,10 +92,12 @@ app.whenReady().then(() => {
   if (!singleInstanceLock) return;
   configureHistory(path.join(app.getPath('userData'), 'quota-history.json'));
   tokenLedger = createTokenLedger();
+  stats = createStats({ getTokens: () => lastTokens });
   hud = createHud({
     settingsPath: path.join(app.getPath('userData'), 'hud-settings.json'),
     onRefresh: () => refreshAll(),
     onAction: name => actions[name](),
+    onOpenStats: () => stats.open(),
   });
   createTray();
   refreshAll().catch(() => {});
@@ -99,6 +108,7 @@ app.on('before-quit', () => {
   app.isQuiting = true;
   if (refreshTimer) clearInterval(refreshTimer);
   hud?.destroy();
+  stats?.destroy();
 });
 
 app.on('window-all-closed', () => {});
