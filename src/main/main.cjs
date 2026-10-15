@@ -4,7 +4,7 @@ const { readAll, configureHistory } = require('./snapshot.cjs');
 const { WORKBUDDY_APP_URL } = require('./workbuddy-client.cjs');
 const { connect: connectClaudeStatusLine, disconnect: disconnectClaudeStatusLine } = require('./claude-statusline-chain.cjs');
 const { nodePath } = require('./local-paths.cjs');
-const { buildHudItems } = require('./hud-view.cjs');
+const { buildHudItems, buildHudTokens } = require('./hud-view.cjs');
 const { createHud } = require('./hud-window.cjs');
 const { createTokenLedger } = require('./token-ledger.cjs');
 
@@ -28,7 +28,7 @@ async function refreshAll() {
 async function performRefresh() {
   const snapshot = await readAll();
   hud?.pushState(buildHudItems(snapshot));
-  tokenLedger?.read().then(tokens => hud?.pushTokens(tokens)).catch(() => {});
+  tokenLedger?.read().then(tokens => hud?.pushTokens(buildHudTokens(tokens))).catch(() => {});
   return snapshot;
 }
 

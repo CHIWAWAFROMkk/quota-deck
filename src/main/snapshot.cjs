@@ -249,6 +249,8 @@ function providerToUi(provider) {
     sharedPool: models.some((model) => model.pool.includes('共享')),
     sharedNotice: [provider.note, freshness, provider.historyWarning].filter(Boolean).join(' · '),
     freshness,
+    planType: provider.planType || '',
+    updatedAt: provider.updatedAt || null,
     models,
     pools,
     modelDirectoryStatus: provider.modelDirectoryStatus,
