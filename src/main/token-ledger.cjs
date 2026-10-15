@@ -1,6 +1,8 @@
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { modelName } = require('./model-names.cjs');
+const MAX_MODELS = 6;
 
 const QUARTER = 15 * 60000;
 const BUCKETS = 96;
@@ -26,7 +28,8 @@ function parseClaudeLine(line) {
   const id = row?.message?.id;
   const at = Date.parse(row?.timestamp);
   if (row?.type !== 'assistant' || typeof id !== 'string' || !usage || typeof usage !== 'object' || !Number.isFinite(at)) return null;
-  return { id, at, tokens: count(usage, 'input_tokens') + count(usage, 'output_tokens') + count(usage, 'cache_creation_input_tokens') + count(usage, 'cache_read_input_tokens') };
+  const model = typeof row.message.model === 'string' && row.message.model ? row.message.model : 'unknown';
+  return { id, at, model, tokens: count(usage, 'input_tokens') + count(usage, 'output_tokens') + count(usage, 'cache_creation_input_tokens') + count(usage, 'cache_read_input_tokens') };
 }
 
 function parseCodexLine(line) {
@@ -37,6 +40,15 @@ function parseCodexLine(line) {
   const at = Date.parse(row?.timestamp);
   if (row?.type !== 'event_msg' || row?.payload?.type !== 'token_count' || !Number.isFinite(total) || total < 0 || !Number.isFinite(at)) return null;
   return { at, total };
+}
+
+// Codex names the model once per turn; the token counts that follow belong to it.
+function parseCodexContext(line) {
+  if (!line.includes('"turn_context"')) return null;
+  let row;
+  try { row = JSON.parse(line); } catch { return null; }
+  const model = row?.payload?.model;
+  return row?.type === 'turn_context' && typeof model === 'string' && model ? model : null;
 }
 
 // Usage of a streamed message only grows, so the fullest copy is its final usage, in any file order.
@@ -90,18 +102,21 @@ const SOURCES = {
     prune(state, since) { for (const [id, event] of state.events) if (event.at < since) state.events.delete(id); },
   },
   codex: {
-    fresh: () => ({ offset: 0, size: 0, mtimeMs: 0, lastTotal: 0, events: [] }),
-    stage: state => ({ lastTotal: state.lastTotal, events: [] }),
+    fresh: () => ({ offset: 0, size: 0, mtimeMs: 0, lastTotal: 0, model: null, events: [] }),
+    stage: state => ({ lastTotal: state.lastTotal, model: state.model, events: [] }),
     take(stage, line) {
+      const model = parseCodexContext(line);
+      if (model) { stage.model = model; return; }
       const event = parseCodexLine(line);
       if (!event) return;
       // A cumulative total going down starts a new segment counted from zero.
       const delta = event.total >= stage.lastTotal ? event.total - stage.lastTotal : event.total;
       stage.lastTotal = event.total;
-      if (delta > 0) stage.events.push({ at: event.at, tokens: delta });
+      if (delta > 0) stage.events.push({ at: event.at, tokens: delta, model: stage.model || 'unknown' });
     },
     commit(state, stage) {
       state.lastTotal = stage.lastTotal;
+      state.model = stage.model;
       state.events = state.events.concat(stage.events);
     },
     events: state => state.events,
@@ -110,7 +125,7 @@ const SOURCES = {
 };
 
 function emptySeries(status, startAt) {
-  return { status, buckets: new Array(BUCKETS).fill(0), total: 0, startAt, partial: false };
+  return { status, buckets: new Array(BUCKETS).fill(0), total: 0, startAt, partial: false, models: [], stacks: Array.from({ length: BUCKETS }, () => []) };
 }
 
 // A file needs reading when it is new, changed since its last complete read, or was only partly read.
@@ -229,11 +244,21 @@ function createTokenLedger({
         else plain.push(event);
       }
     }
-    for (const event of [...merged.values(), ...plain]) {
-      const index = Math.floor((event.at - startAt) / QUARTER);
-      if (index < 0 || index >= BUCKETS) continue;
-      series.buckets[index] += event.tokens;
+    const events = [...merged.values(), ...plain].filter(event => event.at >= startAt && event.at < startAt + BUCKETS * QUARTER);
+    const totals = new Map();
+    for (const event of events) {
+      series.buckets[Math.floor((event.at - startAt) / QUARTER)] += event.tokens;
       series.total += event.tokens;
+      totals.set(event.model, (totals.get(event.model) || 0) + event.tokens);
+    }
+    const ranked = [...totals].sort((a, b) => b[1] - a[1]);
+    const slot = new Map(ranked.slice(0, MAX_MODELS).map(([id], i) => [id, i]));
+    series.models = ranked.slice(0, MAX_MODELS).map(([id, total]) => ({ id, name: modelName(id), total }));
+    if (ranked.length > MAX_MODELS) series.models.push({ id: 'other', name: 'Other', total: ranked.slice(MAX_MODELS).reduce((sum, [, n]) => sum + n, 0) });
+    series.stacks = Array.from({ length: BUCKETS }, () => new Array(series.models.length).fill(0));
+    for (const event of events) {
+      const m = slot.has(event.model) ? slot.get(event.model) : series.models.length - 1;
+      series.stacks[Math.floor((event.at - startAt) / QUARTER)][m] += event.tokens;
     }
     return series;
   }
@@ -255,4 +280,4 @@ function createTokenLedger({
   };
 }
 
-module.exports = { BUCKETS, QUARTER, createTokenLedger, parseClaudeLine, parseCodexLine, windowStart };
+module.exports = { BUCKETS, QUARTER, createTokenLedger, parseClaudeLine, parseCodexContext, parseCodexLine, windowStart };

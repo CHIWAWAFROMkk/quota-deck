@@ -119,3 +119,16 @@ test('a good reading is reused for five minutes and kept for when the API fails'
   assert.equal(limited.last.updatedAt, first.snapshot.updatedAt);
   assert.doesNotMatch(JSON.stringify(limited), /secret-token/);
 });
+
+test('the plan comes from the rate-limit tier when it names a Max size', async () => {
+  const { mkdtemp, writeFile, mkdir } = await import('node:fs/promises');
+  const path = (await import('node:path')).default;
+  await mkdir('work', { recursive: true });
+  const dir = await mkdtemp(path.resolve('work/oauth-plan-'));
+  const cases = [[{ subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' }, 'max_20x'], [{ subscriptionType: 'max', rateLimitTier: 'default_claude_max_5x' }, 'max_5x'], [{ subscriptionType: 'pro', rateLimitTier: 'default_claude_ai' }, 'pro'], [{}, '']];
+  for (const [fields, plan] of cases) {
+    const file = path.join(dir, `${plan || 'none'}.json`);
+    await writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: 'test-token', ...fields } }));
+    assert.equal((await oauth.readCredentials(file)).plan, plan);
+  }
+});

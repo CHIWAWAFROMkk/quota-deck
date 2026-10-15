@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import security from '../src/main/security.cjs';
 
 test('IPC trusts only the exact application document', () => {
-  const entry = resolve('src/renderer/compact.html');
+  const entry = resolve('src/renderer/hud.html');
   const url = pathToFileURL(entry).href;
   assert.equal(security.isTrustedRenderer(url, entry), true);
   for (const untrusted of [undefined, '', 'https://example.org', `${url}?injected`, `${url}/../other.html`, 'file:///other.html']) {

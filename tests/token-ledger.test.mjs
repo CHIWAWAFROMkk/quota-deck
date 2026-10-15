@@ -15,7 +15,8 @@ async function roots() {
   await mkdir(path.join(codexRoot, '2026', '10', '13'), { recursive: true });
   return { claudeRoot, codexRoot };
 }
-const claudeLine = (id, at, usage) => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(), message: { id, usage } });
+const claudeLine = (id, at, usage, model) => JSON.stringify({ type: 'assistant', timestamp: new Date(at).toISOString(), message: { id, usage, ...(model ? { model } : {}) } });
+const contextLine = (at, model) => JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'turn_context', payload: { model } });
 const codexLine = (at, total) => JSON.stringify({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total } } } });
 
 test('windowStart aligns to local quarter hours and covers 96 buckets', () => {
@@ -26,7 +27,10 @@ test('windowStart aligns to local quarter hours and covers 96 buckets', () => {
 test('line parsers ignore anything that is not a usage record', () => {
   assert.equal(ledger.parseClaudeLine('{broken'), null);
   assert.equal(ledger.parseClaudeLine(JSON.stringify({ type: 'user', timestamp: '2026-10-13T00:00:00Z', message: { id: 'x', usage: {} } })), null);
-  assert.deepEqual(ledger.parseClaudeLine(claudeLine('m', 0, { input_tokens: 2, output_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens_details: { thinking_tokens: 99 } })), { id: 'm', at: 0, tokens: 17 });
+  assert.deepEqual(ledger.parseClaudeLine(claudeLine('m', 0, { input_tokens: 2, output_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens_details: { thinking_tokens: 99 } })), { id: 'm', at: 0, tokens: 17, model: 'unknown' });
+  assert.equal(ledger.parseCodexContext(contextLine(0, 'gpt-6.1-sol')), 'gpt-6.1-sol');
+  assert.equal(ledger.parseCodexContext(codexLine(0, 1)), null);
+  assert.equal(ledger.parseCodexContext('{"type":"turn_context","payload":{"model":""}}'), null);
   assert.equal(ledger.parseCodexLine(JSON.stringify({ timestamp: '2026-10-13T00:00:00Z', type: 'event_msg', payload: { type: 'token_count', info: null } })), null);
   assert.deepEqual(ledger.parseCodexLine(codexLine(0, 42)), { at: 0, total: 42 });
 });
@@ -249,4 +253,48 @@ test('a slow scan resumes where it stopped, so every file is counted once within
     assert.ok(result.claude.total <= 8, `round ${round + 1} double counted: ${totals.join(' → ')}`);
   }
   assert.equal(totals.at(-1), 8, `never reached all eight files: ${totals.join(' → ')}`);
+});
+
+const sum = arr => arr.reduce((a, b) => a + b, 0);
+
+test('claude tokens are split by model into stacked buckets', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  await writeFile(path.join(claudeRoot, 'proj', 'session', 'a.jsonl'), [
+    claudeLine('m1', now - 60000, { input_tokens: 100 }, 'claude-opus-5-5'),
+    claudeLine('m2', now - 50000, { input_tokens: 30 }, 'claude-fable-5-1'),
+    claudeLine('m3', now - 40000, { input_tokens: 50 }, 'claude-opus-5-5'),
+  ].join('\n') + '\n');
+  const series = (await ledger.createTokenLedger({ claudeRoot, codexRoot }).read(now)).claude;
+  assert.deepEqual(series.models, [{ id: 'claude-opus-5-5', name: 'Opus 5.5', total: 150 }, { id: 'claude-fable-5-1', name: 'Fable 5.1', total: 30 }]);
+  assert.equal(series.stacks.length, BUCKETS);
+  assert.deepEqual([0, 1].map(m => sum(series.stacks.map(column => column[m]))), [150, 30]);
+  assert.equal(series.total, 180);
+  for (let i = 0; i < BUCKETS; i++) assert.equal(sum(series.stacks[i]), series.buckets[i], `bucket ${i}`);
+});
+
+test('codex remembers the turn model across reads of a growing file', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  const file = path.join(codexRoot, '2026', '10', '13', 'rollout-m.jsonl');
+  await writeFile(file, [codexLine(now - 90000, 10), contextLine(now - 80000, 'gpt-6.1-sol'), codexLine(now - 70000, 40)].join('\n') + '\n');
+  const reader = ledger.createTokenLedger({ claudeRoot, codexRoot });
+  let series = (await reader.read(now)).codex;
+  assert.deepEqual(series.models.map(m => [m.id, m.total]), [['gpt-6.1-sol', 30], ['unknown', 10]]);
+  await appendFile(file, codexLine(now - 1000, 100) + '\n');
+  series = (await reader.read(now)).codex;
+  assert.deepEqual(series.models.map(m => [m.id, m.name, m.total]), [['gpt-6.1-sol', 'GPT-6.1 Sol', 90], ['unknown', 'Unknown', 10]]);
+});
+
+test('more than six models fold into Other and totals still add up', async () => {
+  const { claudeRoot, codexRoot } = await roots();
+  const now = Date.now();
+  const lines = [];
+  for (let i = 0; i < 8; i++) lines.push(claudeLine(`m${i}`, now - 60000, { input_tokens: 100 - i }, `claude-opus-${i + 1}`));
+  await writeFile(path.join(claudeRoot, 'proj', 'session', 'many.jsonl'), lines.join('\n') + '\n');
+  const series = (await ledger.createTokenLedger({ claudeRoot, codexRoot }).read(now)).claude;
+  assert.equal(series.models.length, 7);
+  assert.deepEqual(series.models.at(-1), { id: 'other', name: 'Other', total: 94 + 93 });
+  assert.equal(sum(series.models.map(m => m.total)), series.total);
+  assert.equal(sum(series.stacks.flat()), series.total);
 });

@@ -3,8 +3,6 @@ const { readDeepSeekSnapshot } = require('./deepseek-client.cjs');
 const { readWorkBuddySnapshot } = require('./workbuddy-client.cjs');
 const { readAntigravitySnapshot } = require('./antigravity-client.cjs');
 const { readClaudeSnapshot } = require('./claude-client.cjs');
-const { localAgentAvailability } = require('./orchestrator.cjs');
-const { inferModelStrengths } = require('./model-guidance.cjs');
 const { createHistory } = require('./quota-history.cjs');
 const { OAUTH_SOURCE } = require('./claude-oauth.cjs');
 const planName = plan => (plan ? `Claude ${plan[0].toUpperCase()}${plan.slice(1)}` : 'Claude');
@@ -107,7 +105,7 @@ async function readAll() {
     updatedAt: new Date().toISOString(),
     providers: await Promise.all(ids.map(readProvider)),
   };
-  return { ...toUiSnapshot(raw), agents: localAgentAvailability() };
+  return toUiSnapshot(raw);
 }
 
 function relativeReset(value) {
@@ -216,8 +214,6 @@ function providerToUi(provider) {
       source: model.source || provider.source,
       sync: freshness,
       consumeMultiplier: Number.isFinite(model.consumeMultiplier) ? model.consumeMultiplier : null,
-      strengths: model.strengths || inferModelStrengths(provider.id, model.name),
-      guidanceSource: model.strengths ? '官方说明' : '本地建议',
     };
   });
 
@@ -253,6 +249,8 @@ function providerToUi(provider) {
     sharedPool: models.some((model) => model.pool.includes('共享')),
     sharedNotice: [provider.note, freshness, provider.historyWarning].filter(Boolean).join(' · '),
     freshness,
+    planType: provider.planType || '',
+    updatedAt: provider.updatedAt || null,
     models,
     pools,
     modelDirectoryStatus: provider.modelDirectoryStatus,

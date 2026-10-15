@@ -30,7 +30,9 @@ async function readCredentials(file) {
   try {
     const o = JSON.parse(text.replace(/^\uFEFF/, ''))?.claudeAiOauth;
     if (typeof o?.accessToken !== 'string' || !o.accessToken) return null;
-    return { token: o.accessToken, plan: typeof o.subscriptionType === 'string' ? o.subscriptionType : '' };
+    const tier = typeof o.rateLimitTier === 'string' ? o.rateLimitTier : '';
+    const plan = /max_20x/.test(tier) ? 'max_20x' : /max_5x/.test(tier) ? 'max_5x' : typeof o.subscriptionType === 'string' ? o.subscriptionType : '';
+    return { token: o.accessToken, plan };
   } catch {
     return null; // Claude Code may be rewriting it; the next refresh reads it again.
   }

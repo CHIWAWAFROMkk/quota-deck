@@ -1,53 +1,82 @@
 const MARGIN = 3;
-const WINDOW_SIZE = 480;
-// Five 22px rings, 8px gaps, 8px end padding and 6px side padding. Must match hud.css.
-const STRIP = { long: 158, short: 34 };
+// Big enough for the strip at size 40 plus a 6px gap and the 440px card.
+const WINDOW = Object.freeze({ width: 640, height: 600 });
 const EDGES = ['left', 'right', 'top', 'bottom'];
-const DEFAULT_SETTINGS = Object.freeze({ displayId: null, edge: 'right', offset: 0.3, visible: true });
+const PROVIDERS = ['codex', 'claude', 'antigravity', 'workbuddy', 'deepseek'];
+const METRICS = ['quota', 'burn', 'tokens'];
+// Size 22 with numbers and five items; used until the renderer reports what it measured.
+const DEFAULT_STRIPS = Object.freeze({ vertical: Object.freeze({ width: 92, height: 164 }), horizontal: Object.freeze({ width: 390, height: 30 }) });
+const DEFAULT_SETTINGS = Object.freeze({ displayId: null, edge: 'right', offset: 0.3, visible: true, size: 22, ringWidth: 1.5, showsRings: true, showsNumbers: true, metrics: Object.freeze({}) });
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const isVertical = edge => edge === 'left' || edge === 'right';
+const isPlainObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 function normalizeHudSettings(raw) {
-  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const r = isPlainObject(raw) ? raw : {};
+  const metrics = {};
+  if (isPlainObject(r.metrics)) for (const id of PROVIDERS) if (Object.hasOwn(r.metrics, id) && METRICS.includes(r.metrics[id])) metrics[id] = r.metrics[id];
   return {
     displayId: Number.isSafeInteger(r.displayId) ? r.displayId : null,
     edge: EDGES.includes(r.edge) ? r.edge : DEFAULT_SETTINGS.edge,
     offset: Number.isFinite(r.offset) ? clamp(r.offset, 0, 1) : DEFAULT_SETTINGS.offset,
     visible: typeof r.visible === 'boolean' ? r.visible : DEFAULT_SETTINGS.visible,
+    size: Number.isInteger(r.size) && r.size >= 16 && r.size <= 40 ? r.size : DEFAULT_SETTINGS.size,
+    ringWidth: Number.isFinite(r.ringWidth) && r.ringWidth >= 1 && r.ringWidth <= 4 ? Math.round(r.ringWidth * 2) / 2 : DEFAULT_SETTINGS.ringWidth,
+    showsRings: typeof r.showsRings === 'boolean' ? r.showsRings : DEFAULT_SETTINGS.showsRings,
+    showsNumbers: typeof r.showsNumbers === 'boolean' ? r.showsNumbers : DEFAULT_SETTINGS.showsNumbers,
+    metrics,
   };
 }
 
-/** Window rectangle in screen coordinates, and the collapsed strip's top-left inside it. */
-function layoutHud({ workArea: wa, edge, offset }) {
-  const width = Math.min(WINDOW_SIZE, wa.width);
-  const height = Math.min(WINDOW_SIZE, wa.height);
-  const along = clamp(Number.isFinite(offset) ? offset : DEFAULT_SETTINGS.offset, 0, 1);
-  let sx; let sy; let wx; let wy;
-  if (isVertical(edge)) {
-    sy = Math.round(wa.y + along * Math.max(0, wa.height - STRIP.long));
-    sx = edge === 'left' ? wa.x + MARGIN : wa.x + wa.width - MARGIN - STRIP.short;
-    wx = edge === 'left' ? wa.x : wa.x + wa.width - width;
-    wy = Math.round(clamp(sy + STRIP.long / 2 - height / 2, wa.y, wa.y + wa.height - height));
-  } else {
-    sx = Math.round(wa.x + along * Math.max(0, wa.width - STRIP.long));
-    sy = edge === 'top' ? wa.y + MARGIN : wa.y + wa.height - MARGIN - STRIP.short;
-    wy = edge === 'top' ? wa.y : wa.y + wa.height - height;
-    wx = Math.round(clamp(sx + STRIP.long / 2 - width / 2, wa.x, wa.x + wa.width - width));
-  }
-  return { window: { x: wx, y: wy, width, height }, strip: { x: sx - wx, y: sy - wy }, edge };
+/** Strip sizes the renderer measured for both orientations, or null when either is unusable. */
+function normalizeStrips(raw) {
+  const one = s => (isPlainObject(s) && [s.width, s.height].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 8 && v <= 1200)
+    ? { width: Math.ceil(s.width), height: Math.ceil(s.height) } : null);
+  if (!isPlainObject(raw)) return null;
+  const vertical = one(raw.vertical);
+  const horizontal = one(raw.horizontal);
+  return vertical && horizontal ? { vertical, horizontal } : null;
 }
 
-/** Nearest edge to the strip's centre, and the strip's position along that edge (0–1). */
-function snapToEdge({ workArea: wa, point }) {
-  const px = clamp(point.x, wa.x, wa.x + wa.width);
-  const py = clamp(point.y, wa.y, wa.y + wa.height);
+/** Window rectangle in screen coordinates, and the strip's rectangle inside it. */
+function layoutHud({ workArea: wa, edge, offset, strips = DEFAULT_STRIPS }) {
+  const vertical = isVertical(edge);
+  const strip = vertical ? strips.vertical : strips.horizontal;
+  const width = Math.min(wa.width, Math.max(WINDOW.width, vertical ? 0 : strip.width + 16));
+  const height = Math.min(wa.height, Math.max(WINDOW.height, vertical ? strip.height + 16 : 0));
+  const along = clamp(Number.isFinite(offset) ? offset : DEFAULT_SETTINGS.offset, 0, 1);
+  let sx; let sy; let wx; let wy;
+  if (vertical) {
+    sy = Math.round(wa.y + along * Math.max(0, wa.height - strip.height));
+    sx = edge === 'left' ? wa.x + MARGIN : wa.x + wa.width - MARGIN - strip.width;
+    wx = edge === 'left' ? wa.x : wa.x + wa.width - width;
+    wy = Math.round(clamp(sy + strip.height / 2 - height / 2, wa.y, wa.y + wa.height - height));
+  } else {
+    sx = Math.round(wa.x + along * Math.max(0, wa.width - strip.width));
+    sy = edge === 'top' ? wa.y + MARGIN : wa.y + wa.height - MARGIN - strip.height;
+    wy = edge === 'top' ? wa.y : wa.y + wa.height - height;
+    wx = Math.round(clamp(sx + strip.width / 2 - width / 2, wa.x, wa.x + wa.width - width));
+  }
+  return { window: { x: wx, y: wy, width, height }, strip: { x: sx - wx, y: sy - wy, width: strip.width, height: strip.height }, edge };
+}
+
+/**
+ * Edge nearest the pointer (a tie keeps `current`) and the position along it that keeps
+ * the grabbed point — `grabAlong` px from the strip's start — under the pointer.
+ */
+function snapToEdge({ workArea: wa, cursor, grabAlong = 0, strips = DEFAULT_STRIPS, current = null }) {
+  const px = clamp(cursor.x, wa.x, wa.x + wa.width);
+  const py = clamp(cursor.y, wa.y, wa.y + wa.height);
   const distance = { left: px - wa.x, right: wa.x + wa.width - px, top: py - wa.y, bottom: wa.y + wa.height - py };
-  const edge = EDGES.reduce((best, candidate) => (distance[candidate] < distance[best] ? candidate : best), EDGES[0]);
-  const along = isVertical(edge)
-    ? (py - wa.y - STRIP.long / 2) / Math.max(1, wa.height - STRIP.long)
-    : (px - wa.x - STRIP.long / 2) / Math.max(1, wa.width - STRIP.long);
-  return { edge, offset: clamp(along, 0, 1) };
+  let edge = EDGES.reduce((best, candidate) => (distance[candidate] < distance[best] ? candidate : best), EDGES[0]);
+  if (EDGES.includes(current) && distance[current] === distance[edge]) edge = current;
+  const vertical = isVertical(edge);
+  const strip = vertical ? strips.vertical : strips.horizontal;
+  const long = vertical ? strip.height : strip.width;
+  const start = (vertical ? py - wa.y : px - wa.x) - clamp(grabAlong, 0, long);
+  const room = (vertical ? wa.height : wa.width) - long;
+  return { edge, offset: room > 0 ? clamp(start / room, 0, 1) : 0 };
 }
 
 /** Hit rectangles (window-relative px) reported by the renderer, validated; at most four. */
@@ -70,4 +99,4 @@ function pickDisplay(displays, primary, displayId) {
   return displays.find(display => display.id === displayId) || primary;
 }
 
-module.exports = { DEFAULT_SETTINGS, EDGES, MARGIN, STRIP, WINDOW_SIZE, layoutHud, normalizeHits, normalizeHudSettings, pickDisplay, pointerOverHits, snapToEdge };
+module.exports = { DEFAULT_SETTINGS, DEFAULT_STRIPS, EDGES, MARGIN, WINDOW, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge };
