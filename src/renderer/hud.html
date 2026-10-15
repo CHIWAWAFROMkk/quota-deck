@@ -1,15 +1,18 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' file:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self' file:; img-src 'self' file:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
   <title>QuotaDeck HUD</title>
   <link rel="stylesheet" href="hud.css">
 </head>
 <body class="edge-right">
-  <div id="strip" class="strip hit" role="toolbar" aria-label="AI 额度"></div>
+  <div id="strip" class="strip hit" role="toolbar" aria-label="AI usage"></div>
+  <svg id="dragframe" class="dragframe" aria-hidden="true"><rect></rect></svg>
   <div id="pill" class="pill" role="tooltip" hidden></div>
-  <section id="card" class="card hit" aria-live="polite" hidden></section>
+  <script src="hud-metrics.js"></script>
+  <script src="hud-dom.js"></script>
+  <script src="hud-strip.js"></script>
   <script src="hud.js"></script>
 </body>
 </html>

@@ -6,14 +6,20 @@ function subscribe(channel, callback) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+const plain = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+
 contextBridge.exposeInMainWorld('hud', {
   initial: () => ipcRenderer.invoke('hud:initial'),
   refresh: () => ipcRenderer.invoke('hud:refresh'),
-  openPanel: () => ipcRenderer.invoke('hud:open-panel'),
+  action: (name) => ipcRenderer.invoke('hud:action', String(name)),
+  setSettings: (patch) => ipcRenderer.invoke('hud:settings', plain(patch)),
+  openStats: () => ipcRenderer.invoke('hud:open-stats'),
   hits: (rects) => ipcRenderer.send('hud:hits', Array.isArray(rects) ? rects : []),
   drag: (phase) => ipcRenderer.send('hud:drag', phase === 'start' ? 'start' : 'end'),
   card: (open) => ipcRenderer.send('hud:card', open === true),
+  strips: (value) => ipcRenderer.send('hud:strips', plain(value)),
   onState: (callback) => subscribe('hud:state', callback),
   onTokens: (callback) => subscribe('hud:tokens', callback),
   onLayout: (callback) => subscribe('hud:layout', callback),
+  onSettings: (callback) => subscribe('hud:settings', callback),
 });

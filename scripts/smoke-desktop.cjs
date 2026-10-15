@@ -1,5 +1,5 @@
-// Runs the real main process, sandboxed preload and renderer against synthetic
-// data. Never starts an agent, reads credentials, or calls a provider.
+// Runs the real main process, sandboxed preload and HUD renderer against synthetic
+// data that mirrors the Agent HUD video. Never reads credentials or calls a provider.
 const { app, BrowserWindow } = require('electron');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -8,158 +8,97 @@ const root = path.resolve(process.env.QD_TEST_APP_ROOT || path.join(__dirname, '
 const output = fs.mkdtempSync(path.join(__dirname, '../work/desktop-smoke-'));
 app.setPath('userData', path.join(output, 'profile'));
 const source = require(path.join(root, 'src/main/snapshot.cjs'));
-const { sanitizeClaudePayload, normalizeClaudeSnapshot } = require(path.join(root, 'src/main/claude-client.cjs'));
+const oauth = require(path.join(root, 'src/main/claude-oauth.cjs'));
 const now = Date.now();
-const claude = normalizeClaudeSnapshot(sanitizeClaudePayload({ model: { id: 'fixture', display_name: 'Claude 测试模型' }, rate_limits: { five_hour: { used_percentage: 20, resets_at: now / 1000 + 3600 }, seven_day: { used_percentage: 96, resets_at: now / 1000 + 86400 } } }, now), now);
-const data = { lastUpdated: '12:00', globalStatus: '测试数据 · 非真实额度', agents: { codex: true, claude: true, workbuddy: true, antigravity: true }, providers: [
-  { id: 'codex', name: 'Codex', status: 'critical', remainingPercent: 0, models: [{ name: '<img src=x onerror=alert(1)>', pool: 'shared', poolLabel: '共享额度' }] },
-  claude,
-  { id: 'antigravity', name: 'Antigravity', status: 'stale', models: [] },
-  { id: 'deepseek', name: 'DeepSeek', status: 'error', models: [] },
-  { id: 'workbuddy', name: 'WorkBuddy', status: 'stale', models: [] },
+const updatedAt = new Date(now).toISOString();
+const iso = minutes => new Date(now + minutes * 60000).toISOString();
+const claudeRaw = oauth.parseUsage({ five_hour: { utilization: 12, resets_at: iso(72) }, seven_day: { utilization: 79, resets_at: iso(4 * 1440 + 627) }, seven_day_opus: { utilization: 60, resets_at: iso(4 * 1440 + 627) } }, 'max_20x', now);
+[6.3, 1.4, 0.8].forEach((rate, i) => { claudeRaw.groups[0].buckets[i].burnPerHour = rate; });
+const data = { providers: [
+  { id: 'codex', name: 'Codex', status: 'healthy', precision: 'provider-reported', planType: 'pro', updatedAt, remainingPercent: 51, windows: [{ label: '5h', remainingPercent: 51, windowDurationMins: 300, resetsAt: iso(150) }, { label: 'week', remainingPercent: 70, windowDurationMins: 10080, resetsAt: iso(3000) }], models: [] },
+  claudeRaw,
+  { id: 'antigravity', name: 'Antigravity', status: 'healthy', precision: 'provider-reported', updatedAt, remainingPercent: 91, groups: [{ displayName: 'Gemini', buckets: [{ label: '5 小时', window: '5h', remainingFraction: 0.91, resetTime: iso(200) }] }], models: [] },
+  { id: 'workbuddy', name: 'WorkBuddy', status: 'healthy', precision: 'provider-reported', updatedAt, remainingCredits: 660, totalCredits: 1000, models: [] },
+  { id: 'deepseek', name: 'DeepSeek', status: 'healthy', precision: 'provider-reported', updatedAt, balances: [{ currency: 'CNY', total_balance: '8.85' }], models: [{ name: '<img src=x onerror=alert(1)>' }] },
 ].map(source.providerToUi) };
-let calls = 0;
-let fail = false;
 source.configureHistory = () => {};
-source.readAll = async () => {
-  calls++;
-  await new Promise(resolve => setTimeout(resolve, 30));
-  if (fail) throw new Error('测试刷新失败');
-  return data;
-};
-source.readProvider = async id => data.providers.find(provider => provider.id === id);
+source.readAll = async () => data;
 const tokenModule = require(path.join(root, 'src/main/token-ledger.cjs'));
 const tokenStart = tokenModule.windowStart(now);
-const tokenFixture = {
-  claude: { status: 'ok', buckets: Array.from({ length: 96 }, (_, i) => (i % 7 === 0 ? 1000 + i * 10 : 0)), total: 0, startAt: tokenStart, partial: false },
-  codex: { status: 'unsupported', buckets: new Array(96).fill(0), total: 0, startAt: tokenStart, partial: false },
-};
-tokenFixture.claude.total = tokenFixture.claude.buckets.reduce((a, b) => a + b, 0);
+const stacks = Array.from({ length: 96 }, (_, i) => (i % 9 < 6 ? [200000 + (i % 5) * 60000, i % 3 === 0 ? 90000 : 0] : [0, 0]));
+const claudeTokens = { status: 'ok', startAt: tokenStart, partial: false, stacks, buckets: stacks.map(([a, b]) => a + b), models: [{ id: 'claude-opus-5-5', name: 'Opus 5.5', total: 0 }, { id: 'claude-fable-5-1', name: 'Fable 5.1', total: 0 }] };
+claudeTokens.models.forEach((model, m) => { model.total = stacks.reduce((sum, column) => sum + column[m], 0); });
+claudeTokens.total = claudeTokens.buckets.reduce((a, b) => a + b, 0);
+const tokenFixture = { claude: claudeTokens, codex: { status: 'unsupported', startAt: tokenStart, partial: false, total: 0, buckets: new Array(96).fill(0), models: [], stacks: Array.from({ length: 96 }, () => []) } };
 tokenModule.createTokenLedger = () => ({ read: async () => tokenFixture });
-const orchestrator = require(path.join(root, 'src/main/orchestrator.cjs'));
-const realRun = orchestrator.runCollaboration;
-let completeFixture;
-let fixtureRuns = 0;
-orchestrator.runCollaboration = request => {
-  if (request?.task !== 'fixture crash recovery') return realRun(request);
-  fixtureRuns++;
-  return new Promise(resolve => { completeFixture = resolve; });
-};
 const checks = [];
-const watchdog = setTimeout(() => { console.error('Desktop smoke timed out'); app.exit(1); }, 35000);
+const watchdog = setTimeout(() => { console.error('Desktop smoke timed out'); app.exit(1); }, 60000);
 require(path.join(root, 'src/main/main.cjs'));
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (await fn()) return;
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await sleep(30);
   }
   throw new Error('Timed out waiting for UI');
 }
 app.whenReady().then(async () => {
   const byPage = name => BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith(name));
-  await until(() => byPage('compact.html') && byPage('hud.html'));
-  const window = byPage('compact.html');
+  await until(() => byPage('hud.html'));
   const hudWindow = byPage('hud.html');
-  const evaluate = code => window.webContents.executeJavaScript(code);
-  await until(async () => !window.webContents.isLoading() && await evaluate('document.querySelectorAll(".provider").length === 5'));
-  assert.equal(window.webContents.getLastWebPreferences().sandbox, true);
-  await evaluate('quotaDeck.refreshAll()');
-  await new Promise(resolve => setTimeout(resolve, 50));
-  const prior = calls;
-  await evaluate('Promise.all([quotaDeck.refreshAll(), quotaDeck.refreshAll()])');
-  assert.equal(calls - prior, 1);
-  checks.push('real IPC and concurrent refresh');
-  assert.equal(await evaluate("quotaDeck.refreshProvider('__proto__').then(()=>false,()=>true)"), true);
-  assert.equal(await evaluate("quotaDeck.runCollaboration({task:'test',agents:[]}).then(()=>false,()=>true)"), true);
-  assert.equal(await evaluate("typeof require === 'undefined' && typeof process === 'undefined'"), true);
-  assert.equal(await evaluate("document.querySelectorAll('#providerList img').length"), 0);
-  checks.push('invalid inputs, sandbox, escaped provider content');
-  for (const width of [520, 400]) {
-    window.setSize(width, 760);
-    await evaluate("if (!document.querySelector('[data-provider=claude]').classList.contains('open')) document.querySelector('[data-provider=claude] .provider-summary').click()");
-    await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
-    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
-    assert.equal(await evaluate("document.querySelectorAll('[data-provider=claude] .window-row').length"), 2);
-    assert.equal(await evaluate('/NaN|undefined/.test(document.body.innerText)'), false);
-    fs.writeFileSync(path.join(output, `quota-${width}.png`), (await window.webContents.capturePage()).toPNG());
-  }
-  checks.push('520px and 400px layout');
-  await evaluate("document.querySelector('#aboutBtn').click()");
-  await until(() => evaluate("document.querySelector('#appVersion').textContent.includes('.')"));
-  assert.equal(await evaluate("document.querySelector('#aboutDialog').open"), true);
-  await evaluate("document.querySelector('#aboutDialog button').click()");
-  assert.equal(await evaluate("document.querySelector('#aboutDialog').open"), false);
-  await evaluate('quotaDeck.hide()');
-  assert.equal(window.isVisible(), false);
-  checks.push('version dialog, keyboard-native dismissal and tray hiding');
-  await evaluate("document.querySelector('[data-view=collab]').click()");
-  assert.equal(await evaluate("document.querySelectorAll('#agentChoices input:checked').length"), 0);
-  await evaluate("document.querySelector('#agentChoices input[value=codex]').click(); document.querySelector('#agentChoices input[value=workbuddy]').click(); document.querySelector('#refreshBtn').click()");
-  await until(() => evaluate('!document.querySelector("#refreshBtn").disabled'));
-  assert.equal(await evaluate("document.querySelectorAll('#agentChoices input:checked').length"), 2);
-  fail = true;
-  await evaluate('document.querySelector("#refreshBtn").click()');
-  await until(() => evaluate('!document.querySelector("#refreshBtn").disabled'));
-  assert.equal(await evaluate('document.querySelectorAll(".provider").length'), 5);
-  assert.equal(await evaluate('document.querySelector("#toast").textContent.includes("测试刷新失败")'), true);
-  fail = false;
-  await evaluate('quotaDeck.refreshAll()');
-  checks.push('explicit selection, selection retention, failed refresh recovery');
-  const alien = new BrowserWindow({ show: false, webPreferences: { preload: path.join(root, 'src/main/preload.cjs'), contextIsolation: true, sandbox: true } });
-  await alien.loadFile(path.join(root, 'src/renderer/compact.html'));
-  assert.equal(await alien.webContents.executeJavaScript('quotaDeck.refreshAll().then(()=>false,()=>true)'), true);
-  alien.destroy();
-  checks.push('other window IPC denied');
   const hudEval = code => hudWindow.webContents.executeJavaScript(code);
-  await until(async () => !hudWindow.webContents.isLoading() && await hudEval('document.querySelectorAll("#strip .item").length === 5'));
-  assert.equal(hudWindow.isAlwaysOnTop(), true);
-  assert.equal(hudWindow.webContents.getLastWebPreferences().sandbox, true);
-  assert.equal(await hudEval('typeof require === "undefined" && typeof process === "undefined"'), true);
-  assert.deepEqual(await hudEval('[...document.querySelectorAll("#strip .item")].map(b => b.dataset.id)'), ['codex', 'claude', 'antigravity', 'deepseek', 'workbuddy']);
-  await until(() => hudEval('[...document.querySelectorAll("#strip img")].every(img => img.complete && img.naturalWidth > 0)'));
-  assert.equal(await hudEval('document.querySelector("[data-id=codex] .ring").classList.contains("high")'), true);
-  assert.equal(await hudEval('document.querySelector("[data-id=antigravity] .ring .value") === null'), true);
-  await hudEval(`(() => { const b = document.querySelector('[data-id=claude]');
+  const shot = async name => fs.writeFileSync(path.join(output, `${name}.png`), (await hudWindow.webContents.capturePage()).toPNG());
+  const hover = id => hudEval(`document.querySelector('#strip [data-id=${id}]').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`);
+  const unhover = () => hudEval('document.querySelector("#strip").dispatchEvent(new MouseEvent("mouseleave"))');
+  const click = id => hudEval(`(() => { const b = document.querySelector('#strip [data-id=${id}]');
     b.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10 }));
     b.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true, screenX: 10, screenY: 10 })); })()`);
-  await until(() => hudEval('!document.querySelector("#card").hidden && document.querySelectorAll("#card .row").length === 2'));
-  const sameLayout = await hudEval('hud.initial().then(state => state.layout)');
-  hudWindow.webContents.send('hud:layout', sameLayout);
-  await hudEval('new Promise(resolve => setTimeout(resolve, 100))');
-  assert.equal(await hudEval('document.querySelector("#card").hidden'), false, 'an unchanged layout (e.g. taskbar auto-hide) keeps the card open');
-  assert.ok(await hudEval('document.querySelectorAll("#card .chart rect").length') > 0);
-  assert.equal(await hudEval('/NaN|undefined/.test(document.querySelector("#card").innerText)'), false);
-  await hudEval('document.querySelector("#card .row").click()');
-  assert.match(await hudEval('document.querySelector("#card .row-value").textContent'), /%\/h|采样中/);
-  await hudEval('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
-  assert.equal(await hudEval('document.querySelector("#card").hidden'), true);
-  await hudEval('new Promise(resolve => setTimeout(resolve, 300))');
-  assert.equal(await hudEval('document.querySelector("#strip").classList.contains("open")'), false, 'closing the card away from the strip returns to rings only');
-  fs.writeFileSync(path.join(output, 'hud.png'), (await hudWindow.webContents.capturePage()).toPNG());
+  await until(async () => !hudWindow.webContents.isLoading() && await hudEval('document.querySelectorAll("#strip .item").length === 5 && document.querySelector("#strip .num")?.textContent === "49%"'));
+
+  assert.equal(BrowserWindow.getAllWindows().length, 1, 'no big panel window');
+  assert.equal(hudWindow.isAlwaysOnTop(), true);
+  assert.equal(hudWindow.webContents.getLastWebPreferences().sandbox, true);
+  assert.equal(await hudEval('typeof require === "undefined" && typeof process === "undefined" && typeof hud.openPanel === "undefined"'), true);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#strip .item")].map(b => b.dataset.id)'), ['codex', 'claude', 'antigravity', 'workbuddy', 'deepseek']);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#strip .num")].map(n => n.textContent)'), ['49%', '79%', '9%', '34%', '¥8.85']);
+  await until(() => hudEval('[...document.querySelectorAll("#strip img")].every(img => img.complete && img.naturalWidth > 0)'));
+  assert.equal(await hudEval('document.fonts.check("500 13px Inter")'), true, 'Inter loaded');
+  checks.push('HUD only: five rings, video numbers, logos, Inter, sandbox');
+
+  await until(async () => {
+    const [main, dom] = await Promise.all([hudEval('hud.initial().then(s => s.layout)'), hudEval('(() => { const s = document.querySelector("#strip"); return { x: s.offsetLeft, y: s.offsetTop, width: s.offsetWidth, height: s.offsetHeight }; })()')]);
+    return JSON.stringify(main.strip) === JSON.stringify(dom) && main.size.width - dom.x - dom.width === 3;
+  });
+  checks.push('renderer-measured strip matches the main-process layout and sits 3px off the right edge');
+
+  await hover('claude');
+  await sleep(200);
+  assert.equal(await hudEval('document.querySelector("#pill").classList.contains("shown")'), false, 'not before 400ms');
+  await until(() => hudEval('document.querySelector("#pill").classList.contains("shown")'));
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#pill .pair")].map(p => p.textContent)'), ['5h12%', 'Weekly79%', 'Opus60%']);
+  await sleep(450);
+  await shot('hud-pill');
+  await hover('deepseek');
+  await until(() => hudEval('document.querySelector("#pill").textContent === "Balance¥8.85"'));
+  await unhover();
+  await until(() => hudEval('document.querySelector("#pill").hidden'));
+  checks.push('hover capsule after 400ms, follows marks, hides after leaving');
+
+  await hudEval('hud.setSettings({ showsNumbers: false })');
+  await until(() => hudEval('document.querySelector("#strip").offsetWidth === 32'));
+  await hudEval('hud.setSettings({ showsNumbers: true })');
+  await until(() => hudEval('document.querySelector("#strip").offsetWidth > 60'));
+  await sleep(300); // the main process re-lays the window after the size report; let it repaint
+  await shot('hud-strip');
+  checks.push('settings change re-measures the strip');
+
   const alienHud = new BrowserWindow({ show: false, webPreferences: { preload: path.join(root, 'src/main/preload-hud.cjs'), contextIsolation: true, sandbox: true } });
   await alienHud.loadFile(path.join(root, 'src/renderer/hud.html'));
-  assert.equal(await alienHud.webContents.executeJavaScript('hud.refresh().then(()=>false,()=>true)'), true);
+  assert.equal(await alienHud.webContents.executeJavaScript('hud.action("claude-help").then(()=>false,()=>true)'), true);
+  assert.equal(await alienHud.webContents.executeJavaScript('hud.setSettings({ size: 40 }).then(()=>false,()=>true)'), true);
   alienHud.destroy();
-  checks.push('HUD: five rings with logos, click card with tokens, rate toggle, Esc, sandbox, IPC origin');
-  await evaluate("void quotaDeck.runCollaboration({task:'fixture crash recovery',agents:['codex','claude']}).catch(()=>{}); true");
-  await until(() => Boolean(completeFixture));
-  const crashed = new Promise(resolve => window.webContents.once('render-process-gone', resolve));
-  const recovered = new Promise(resolve => window.webContents.once('did-finish-load', resolve));
-  window.webContents.forcefullyCrashRenderer();
-  await crashed;
-  await recovered;
-  await until(async () => {
-    try { return !window.webContents.isLoading() && await evaluate('document.querySelectorAll(".provider").length === 5 && document.querySelector("#runCollabBtn").disabled'); }
-    catch { return false; }
-  });
-  assert.equal(await evaluate("quotaDeck.runCollaboration({task:'fixture crash recovery',agents:['codex','claude']}).then(()=>false,()=>true)"), true);
-  completeFixture({ results: [{ id: 'codex', status: 'done', output: '恢复后仍可查看的测试结果' }] });
-  await until(() => evaluate('document.querySelector("#collabResults").textContent.includes("恢复后仍可查看")'));
-  assert.equal(fixtureRuns, 1);
-  await window.loadFile(path.join(root, 'src/renderer/compact.html'));
-  await until(() => evaluate('document.querySelector("#collabResults").textContent.includes("恢复后仍可查看")'));
-  assert.equal(fixtureRuns, 1);
-  checks.push('renderer crash recovery and collaboration result retention without resubmission');
+  checks.push('HUD IPC origin enforced');
+  // <<more checks>>
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ electron: process.versions.electron, checks }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, output, electron: process.versions.electron }));
   clearTimeout(watchdog);
