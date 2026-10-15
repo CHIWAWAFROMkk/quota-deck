@@ -12,18 +12,16 @@ Windows 桌面 AI 额度显示器与本地 Agent 并行任务入口。使用 Ele
 - Antigravity：优先读取本机服务额度和可选模型目录，目录失败才回退 CLI，按共享池显示窗口、重置时间与采样消耗速度。
 - DeepSeek：使用官方 API 读取共享账户余额与模型列表。
 - WorkBuddy：读取用户自行保存的官方网页 JSON 快照，显示模型消费倍率；不是自动同步网页。
-- 模型库：列出连接器当前返回的全部模型，支持搜索；能力标签是本地启发式建议，未经基准评测。
 - 并行任务：可选择 Codex、Claude Code、Antigravity、WorkBuddy；分工分别为技术方案、独立审查、替代方案、交付结构。仅用户勾选后发起，CLI 检测与额度快照状态分离。
 - 托盘窗口、桌面快捷方式、可选登录后监听已知 Agent 启动。
-- 界面异常可有限自动恢复，也可从托盘重新加载；本次运行中的协作状态和最后结果在内存中保留，不会因重载自动再次调用模型，完整退出后不保留。
 
 ## 贴边 HUD
 
 启动后屏幕边缘会出现一条深色小浮条，每个服务商一个圆环，画的是用量最高的那个窗口：已用不到 70% 绿色，70% 起黄色，90% 起红色；空环加「–」表示没有读数，虚线环表示旧数据。
 
 - 鼠标移到浮条上显示百分比；停在某个图标上显示它每个窗口的用量。
-- 点图标打开卡片：各窗口已用与重置时间（点一行切换为消耗速率），Claude 与 Codex 还有过去 24 小时每 15 分钟的 Token 柱。点卡片外或按 Esc 关闭，「完整面板」打开原来的额度面板。
-- 按住浮条拖动，松手吸附到最近的屏幕边，位置会记住。托盘菜单「显示 HUD」可开关；HUD 显示时启动不再自动弹出完整面板。
+- 点图标打开卡片：各窗口已用与重置时间（点一行切换为消耗速率），Claude 与 Codex 还有过去 24 小时每 15 分钟的 Token 柱。点卡片外或按 Esc 关闭。
+- 按住浮条拖动，松手吸附到最近的屏幕边，位置会记住。托盘菜单「显示 HUD」可开关。
 - Token 统计只读本机 `~/.claude/projects` 与 `~/.codex/sessions` 的日志，每轮最多用 2 秒，不上传。
 - 服务商图标来自 [Lobe Icons](https://github.com/lobehub/lobe-icons)（MIT，见 `assets/logos/LICENSE-lobe-icons.txt`）；WorkBuddy 暂用 CodeBuddy 图标。
 
@@ -106,13 +104,12 @@ Antigravity 模型目录优先读取同一本机服务的 `GetAvailableModels`�
 - [Codex Usage Monitor](https://github.com/upstream-ray/codex-usage-monitor)：紧凑额度与重置展示。
 - [WhereMyTokens](https://github.com/jeongwookie/WhereMyTokens)：区分历史消耗与额度窗口。
 - [AI Usage Dashboard](https://github.com/neyham/ai-usage-dashboard)：独立刷新与上次成功数据保留。
-- 协作是所选 Agent 的独立并行结果，不包含互相审查、多轮沟通、自动合并代码或自动最终汇总。使用只读／规划模式，仍会消耗服务商额度；检测到 CLI 不等于已验证登录。
 - 本机 CLI 可能加载自身上下文；任务由所选 Agent 发送给其服务商。请按实际任务选择是否提交敏感内容。
 
 ## 验证与开发
 
 `npm run check` 覆盖共享额度映射、输出解析和状态边界。真实账号连通性测试不会自动在测试套件或 CI 中运行。
 
-核心代码：`src/main/` 为连接器与任务调度，`src/renderer/compact.*` 为正式界面，`scripts/` 为预览和 Windows 打包工具。
+核心代码：`src/main/` 为连接器与 HUD 主进程，`src/renderer/hud*` 为界面，`scripts/` 为冒烟与 Windows 打包工具。
 
 本项目与 OpenAI、Google、DeepSeek、腾讯无官方隶属关系；相关商标属于各自权利人。

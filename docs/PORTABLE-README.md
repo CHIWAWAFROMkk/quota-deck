@@ -42,6 +42,5 @@ powershell.exe -NoProfile -File .\verify-package.ps1
 - WorkBuddy 当前读取官方网页快照，不是自动抓取网页；格式见 `resources/app/README.md`。
 - DeepSeek 使用本机环境变量 `DEEPSEEK_API_KEY`，不要把密钥发给他人或写入公开文件。
 - 不公开的模型倍率、共享关系或额度显示未知，不编造独立模型余额。模型能力标签为本地建议。
-- 多 Agent 协作需要主动勾选，实际执行会消耗对应服务商额度。界面重载不重复调用；软件完整退出后不保留任务和结果。
 
 本机配置、Claude 桥接快照与 WorkBuddy 快照位于 `%APPDATA%/QuotaDeck`。不要将该私人目录随软件一起发布。
