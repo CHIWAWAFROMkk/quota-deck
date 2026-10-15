@@ -2,18 +2,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { isTrustedRenderer } = require('./security.cjs');
-const { STRIP, WINDOW_SIZE, layoutHud, normalizeHits, normalizeHudSettings, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
+const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
 
 const hudEntry = path.join(__dirname, '..', 'renderer', 'hud.html');
 const DRAG_LIMIT_MS = 60_000;
+const DRAG_TICK_MS = 16;
 // On Windows only 'normal' and 'pop-up-menu'+ make the window topmost; 'floating' (the default) does not.
 const TOP_LEVEL = 'normal';
 // Forwarded mouse events flap between enter and leave on Windows, so the main process
 // decides click-through itself by polling the cursor against the rectangles the page reports.
 const POLL_MS = 40;
-const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card'];
-const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action'];
 const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy'];
+const SETTING_KEYS = ['size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
+const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card', 'hud:strips'];
+const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats'];
 
 function loadSettings(file) {
   try { return normalizeHudSettings(JSON.parse(fs.readFileSync(file, 'utf8'))); }
@@ -29,12 +31,16 @@ function saveSettings(file, settings) {
   } catch { /* a lost position is not worth interrupting the HUD */ }
 }
 
+// What the page draws from; position and visibility stay in the main process.
+const displaySettings = s => ({ size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers, metrics: { ...s.metrics } });
+
 // `electron` is injectable so tests can drive the window logic with fakes.
-function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 'ignored' }), electron = require('electron') }) {
+function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 'ignored' }), onOpenStats = () => {}, electron = require('electron') }) {
   const { BrowserWindow, ipcMain, screen } = electron;
   let settings = loadSettings(settingsPath);
   let win = null;
   let layout = null;
+  let strips = DEFAULT_STRIPS;
   let items = [];
   let tokens = null;
   let drag = null;
@@ -45,7 +51,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
 
   const alive = () => win && !win.isDestroyed();
   const send = (channel, payload) => { try { if (alive()) win.webContents.send(channel, payload); } catch { /* renderer restarting */ } };
-  const layoutMessage = (dragging = false) => (layout ? { edge: layout.edge, strip: layout.strip, size: { width: layout.window.width, height: layout.window.height }, dragging } : null);
+  const layoutMessage = () => (layout ? { edge: layout.edge, strip: layout.strip, size: { width: layout.window.width, height: layout.window.height }, dragging: Boolean(drag) } : null);
   const trusted = event => alive() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && isTrustedRenderer(event.senderFrame.url, hudEntry);
 
   function setIgnore(flag) {
@@ -62,12 +68,16 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     win.setAlwaysOnTop(true, TOP_LEVEL);
   }
 
-  function place() {
-    if (!alive() || drag) return;
+  // Lay the window out for the current settings; tell the page whenever what it draws from changed.
+  function place(force = false) {
+    if (!alive()) return;
     const display = pickDisplay(screen.getAllDisplays(), screen.getPrimaryDisplay(), settings.displayId);
-    layout = layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset });
-    win.setBounds(layout.window, false);
-    send('hud:layout', layoutMessage());
+    const next = layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset, strips });
+    const moved = !layout || JSON.stringify(next.window) !== JSON.stringify(layout.window);
+    const changed = moved || JSON.stringify(next) !== JSON.stringify(layout);
+    layout = next;
+    if (moved) win.setBounds(layout.window, false);
+    if (changed || force) send('hud:layout', layoutMessage());
   }
 
   // A new renderer starts with no press, no open card and the pointer outside;
@@ -78,7 +88,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     if (!alive()) return;
     setIgnore(true);
     win.setFocusable(false);
-    place();
+    place(true);
   }
 
   function trackPointer() {
@@ -86,46 +96,65 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     setIgnore(!pointerOverHits({ cursor: screen.getCursorScreenPoint(), bounds: win.getBounds(), hits }));
   }
 
+  // Every tick the strip jumps to the edge nearest the pointer, keeping the grabbed point under it.
+  function follow() {
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    const snapped = snapToEdge({ workArea: display.workArea, cursor, grabAlong: drag.grabAlong, strips, current: settings.edge });
+    if (snapped.edge === settings.edge && snapped.offset === settings.offset && display.id === settings.displayId) return;
+    settings = { ...settings, displayId: display.id, ...snapped };
+    place();
+  }
+
   function startDrag() {
     if (drag || !alive() || !layout) return;
     const cursor = screen.getCursorScreenPoint();
-    const [x, y] = win.getPosition();
+    const bounds = win.getBounds();
+    const vertical = layout.edge === 'left' || layout.edge === 'right';
+    const grabAlong = vertical ? cursor.y - bounds.y - layout.strip.y : cursor.x - bounds.x - layout.strip.x;
     const startedAt = Date.now();
-    drag = { dx: cursor.x - x, dy: cursor.y - y, timer: setInterval(() => {
+    drag = { grabAlong, timer: setInterval(() => {
       if (!alive() || Date.now() - startedAt > DRAG_LIMIT_MS) { endDrag(); return; }
-      const point = screen.getCursorScreenPoint();
-      win.setPosition(point.x - drag.dx, point.y - drag.dy, false);
-    }, 16) };
+      follow();
+    }, DRAG_TICK_MS) };
     setIgnore(false);
-    send('hud:layout', layoutMessage(true));
+    place(true);
   }
 
   function endDrag() {
     if (!drag) return;
     clearInterval(drag.timer);
     drag = null;
-    if (!alive() || !layout) return;
-    const [x, y] = win.getPosition();
-    const vertical = layout.edge === 'left' || layout.edge === 'right';
-    const center = {
-      x: x + layout.strip.x + (vertical ? STRIP.short : STRIP.long) / 2,
-      y: y + layout.strip.y + (vertical ? STRIP.long : STRIP.short) / 2,
-    };
-    const display = screen.getDisplayNearestPoint({ x: Math.round(center.x), y: Math.round(center.y) });
-    settings = { ...settings, displayId: display.id, ...snapToEdge({ workArea: display.workArea, point: center }) };
+    if (!alive()) return;
     saveSettings(settingsPath, settings);
+    place(true);
+  }
+
+  function applySettings(patch) {
+    const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
+    const merged = { ...settings };
+    for (const key of SETTING_KEYS) {
+      if (!Object.hasOwn(p, key)) continue;
+      merged[key] = key === 'metrics' ? { ...settings.metrics, ...(p.metrics && typeof p.metrics === 'object' ? p.metrics : {}) } : p[key];
+    }
+    if (p.resetPosition === true) Object.assign(merged, { displayId: DEFAULT_SETTINGS.displayId, edge: DEFAULT_SETTINGS.edge, offset: DEFAULT_SETTINGS.offset });
+    settings = normalizeHudSettings(merged);
+    saveSettings(settingsPath, settings);
+    send('hud:settings', displaySettings(settings));
     place();
+    return displaySettings(settings);
   }
 
   function create() {
     win = new BrowserWindow({
-      width: WINDOW_SIZE, height: WINDOW_SIZE, show: false, frame: false, transparent: true,
+      width: WINDOW.width, height: WINDOW.height, show: false, frame: false, transparent: true,
       backgroundColor: '#00000000', resizable: false, minimizable: false, maximizable: false,
       fullscreenable: false, skipTaskbar: true, focusable: false, hasShadow: false, alwaysOnTop: true,
       webPreferences: { preload: path.join(__dirname, 'preload-hud.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
     const created = win;
     ignoring = null;
+    layout = null;
     win.setAlwaysOnTop(true, TOP_LEVEL);
     setIgnore(true);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -135,8 +164,10 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     win.webContents.session.setPermissionCheckHandler(() => false);
     win.webContents.on('did-finish-load', () => {
       if (win !== created || !alive()) return;
-      place();
+      place(true);
+      // Items before settings, so the page's first measurement already has all five numbers.
       send('hud:state', items);
+      send('hud:settings', displaySettings(settings));
       if (tokens) send('hud:tokens', tokens);
       if (settings.visible) reveal();
     });
@@ -155,6 +186,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     win.loadFile(hudEntry).catch(() => {});
   }
 
+  const guard = handler => (event, ...args) => { if (!trusted(event)) throw new Error('不可信的请求来源'); return handler(...args); };
   ipcMain.on('hud:hits', (event, rects) => { if (trusted(event)) hits = normalizeHits(rects); });
   ipcMain.on('hud:drag', (event, phase) => { if (!trusted(event)) return; if (phase === 'start') startDrag(); else if (phase === 'end') endDrag(); });
   ipcMain.on('hud:card', (event, open) => {
@@ -162,13 +194,21 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     win.setFocusable(open);
     if (open) win.focus();
   });
-  const guard = handler => (event, ...args) => { if (!trusted(event)) throw new Error('不可信的请求来源'); return handler(...args); };
-  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, layout: layoutMessage() })));
+  ipcMain.on('hud:strips', (event, raw) => {
+    if (!trusted(event)) return;
+    const next = normalizeStrips(raw);
+    if (!next || JSON.stringify(next) === JSON.stringify(strips)) return;
+    strips = next;
+    place();
+  });
+  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, layout: layoutMessage(), settings: displaySettings(settings) })));
   ipcMain.handle('hud:refresh', guard(async () => { await onRefresh(); return true; }));
   ipcMain.handle('hud:action', guard(name => {
     if (typeof name !== 'string' || !ACTIONS.includes(name)) throw new Error('未知操作');
     return onAction(name);
   }));
+  ipcMain.handle('hud:settings', guard(patch => applySettings(patch)));
+  ipcMain.handle('hud:open-stats', guard(() => { onOpenStats(); return true; }));
 
   const onDisplays = () => place();
   screen.on('display-metrics-changed', onDisplays);
