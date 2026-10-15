@@ -75,7 +75,7 @@ test('reset and burn text cover past, missing and exhausted windows', () => {
   assert.ok(Math.abs(rates.card.rows[0].burn.projectedPct - 19.56) < 0.01);
 
   const edges = item({ providers: [claude({ five_hour: { utilization: 100, resets_at: at(30) }, seven_day: { utilization: 10, resets_at: null } }, [5, 0])] }, 'claude');
-  assert.deepEqual(edges.card.rows.map(row => row.burn.detail), ['Exhausted', 'No usage']);
+  assert.deepEqual(edges.card.rows.map(row => row.burn.detail), ['Exhausted', 'No estimate']);
   assert.equal(edges.card.rows[1].reset, '—');
 
   const stale = item({ providers: [{ ...codex(50), status: 'stale', updatedAt: new Date(now - 2 * 3600000).toISOString(), gauge: { ...codex(50).gauge, provenance: 'stale' } }] }, 'codex');
@@ -131,4 +131,17 @@ test('token data gets per-hour and per-day texts', () => {
   assert.equal(tokens.claude.totalText, '31M tok');
   assert.equal(tokens.codex.perHour, '0/h');
   assert.deepEqual([950, 1234, 123456, 9_960_000, 2_500_000_000].map(view.compact), ['950', '1.2K', '123K', '10M', '2.5B']);
+});
+
+
+test('missing or elapsed resets suppress burn estimates for every rate and usage state', () => {
+  for (const reset of [null, 'bad', at(-1), at(0)]) {
+    for (const rate of [null, 0, 5]) {
+      for (const used of [10, 100]) {
+        const entry = item({ providers: [claude({ five_hour: { utilization: used, resets_at: reset } }, [rate])] }, 'claude');
+        assert.equal(entry.card.rows[0].burn.detail, 'No estimate', `reset=${reset}, rate=${rate}, used=${used}`);
+        assert.equal(entry.card.rows[0].burn.projectedPct, null);
+      }
+    }
+  }
 });

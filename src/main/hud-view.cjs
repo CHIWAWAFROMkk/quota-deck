@@ -63,11 +63,10 @@ function burnFor(w, usedPct, now, stale) {
   const rate = w.burnPerHour;
   const value = Number.isFinite(rate) ? `${Math.max(0, rate).toFixed(1)}%/h` : '—';
   const at = parseTime(w.resetsAt);
-  if (stale || usedPct === null) return { value: '—', level: 'none', detail: 'No estimate', projectedPct: null };
+  if (stale || usedPct === null || !Number.isFinite(at) || at <= now) return { value: '—', level: 'none', detail: 'No estimate', projectedPct: null };
   if (usedPct >= 100) return { value, level: 'high', detail: 'Exhausted', projectedPct: 100 };
   if (!Number.isFinite(rate)) return { value: '—', level: 'none', detail: 'Insufficient data', projectedPct: null };
   if (rate <= 0) return { value: '0.0%/h', level: 'ok', detail: 'No usage', projectedPct: usedPct };
-  if (!Number.isFinite(at) || at <= now) return { value, level: 'ok', detail: 'No estimate', projectedPct: null };
   const projected = usedPct + rate * (at - now) / HOUR;
   if (projected < 100) return { value, level: 'ok', detail: `${Math.round(projected)}% by reset`, projectedPct: projected };
   return { value, level: 'warn', detail: whenText(now + (100 - usedPct) / rate * HOUR, now), projectedPct: 100 };
