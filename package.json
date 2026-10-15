@@ -10,6 +10,7 @@
     "start": "electron .",
     "check": "node --test tests/*.test.mjs",
     "check:desktop": "node scripts/run-desktop-smoke.cjs",
+    "compare": "node scripts/run-compare.cjs",
     "package:portable": "pwsh -NoProfile -File scripts/package-portable.ps1"
   },
   "devDependencies": {

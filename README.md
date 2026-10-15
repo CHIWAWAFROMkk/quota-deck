@@ -17,13 +17,13 @@ Windows 桌面 AI 额度显示器与本地 Agent 并行任务入口。使用 Ele
 
 ## 贴边 HUD
 
-启动后屏幕边缘会出现一条深色小浮条，每个服务商一个圆环，画的是用量最高的那个窗口：已用不到 70% 绿色，70% 起黄色，90% 起红色；空环加「–」表示没有读数，虚线环表示旧数据。
+界面照 Agent HUD（`jazzenchen/agent-hud-open`，Apache-2.0）的简约形态复刻，QuotaDeck 只有这一种界面：
 
-- 鼠标移到浮条上显示百分比；停在某个图标上显示它每个窗口的用量。
-- 点图标打开卡片：各窗口已用与重置时间（点一行切换为消耗速率），Claude 与 Codex 还有过去 24 小时每 15 分钟的 Token 柱。点卡片外或按 Esc 关闭。
-- 按住浮条拖动，松手吸附到最近的屏幕边，位置会记住。托盘菜单「显示 HUD」可开关。
-- Token 统计只读本机 `~/.claude/projects` 与 `~/.codex/sessions` 的日志，每轮最多用 2 秒，不上传。
-- 服务商图标来自 [Lobe Icons](https://github.com/lobehub/lobe-icons)（MIT，见 `assets/logos/LICENSE-lobe-icons.txt`）；WorkBuddy 暂用 CodeBuddy 图标。
+- 屏幕边缘一条小浮条，Codex、Claude、Antigravity、WorkBuddy、DeepSeek 各一个额度圆环；数字是已用比例（余额类写余额），不到 70% 绿、70% 起黄、90% 起红，没读到写 `–`。
+- 鼠标停在图标上 0.4 秒，旁边伸出一行明细，例如 `5h 12%  Weekly 79%  Opus 60%`。
+- 点击图标弹出这家的卡片：右上角 `%` / `🔥` / `#` 切换已用比例、消耗速率、每小时 Token；Claude 与 Codex 还有过去 24 小时按模型堆叠的 Token 柱，悬停看每 15 分钟明细。
+- 卡片左下齿轮是设置（尺寸、圆环、数字、复位位置、Claude statusLine 与 WorkBuddy 接入），右下图标打开 24 小时 Token 统计窗口。
+- 按住浮条拖动，它会实时吸到离指针最近的屏幕边，贴上下边时变成横条；松手后位置会记住。托盘菜单「显示 HUD」可开关。
 
 ## 运行
 
@@ -105,6 +105,7 @@ Antigravity 模型目录优先读取同一本机服务的 `GetAvailableModels`�
 - [WhereMyTokens](https://github.com/jeongwookie/WhereMyTokens)：区分历史消耗与额度窗口。
 - [AI Usage Dashboard](https://github.com/neyham/ai-usage-dashboard)：独立刷新与上次成功数据保留。
 - 本机 CLI 可能加载自身上下文；任务由所选 Agent 发送给其服务商。请按实际任务选择是否提交敏感内容。
+- 界面字体 Inter（SIL OFL 1.1），许可证见 `assets/fonts/LICENSE-inter.txt`。
 
 ## 验证与开发
 

@@ -136,6 +136,7 @@ app.whenReady().then(async () => {
   assert.match(await hudEval('document.querySelector("#card .tip-period").textContent'), /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{1,2} [A-Z][a-z]{2} at \d\d:\d\d – \d\d:\d\d$/);
   assert.match(await hudEval('document.querySelector("#card .tip-total").textContent'), /^[\d,]+ tokens$/);
   assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .tip-row .tip-name")].map(n => n.textContent)'), ['Opus 5.5', 'Fable 5.1']);
+  await sleep(200); // let the tooltip paint before capturing
   await shot('hud-tooltip');
   checks.push('tokens: stacked by model, hover tooltip with period, total and models');
 
@@ -187,6 +188,27 @@ app.whenReady().then(async () => {
   await until(() => hudEval('document.querySelector("#card").hidden || !document.querySelector("#card").classList.contains("shown")'));
   if (await hudEval('!document.querySelector("#card").hidden')) await hudEval('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
   checks.push('statistics window: sandboxed, per-model table, time axis');
+  const { screen } = require('electron');
+  const area = screen.getPrimaryDisplay().workArea;
+  const realCursor = screen.getCursorScreenPoint;
+  const before = await hudEval('hud.initial().then(s => s.layout)');
+  const bounds = hudWindow.getBounds();
+  let pointer = { x: bounds.x + before.strip.x + 10, y: bounds.y + before.strip.y + 40 };
+  screen.getCursorScreenPoint = () => pointer;
+  await hudEval('hud.drag("start")');
+  pointer = { x: area.x + Math.round(area.width / 2), y: area.y + 2 };
+  await until(async () => (await hudEval('hud.initial().then(s => s.layout)')).edge === 'top');
+  assert.equal(await hudEval('document.body.classList.contains("dragging")'), true);
+  await hudEval('hud.drag("end")');
+  await until(async () => { const l = await hudEval('hud.initial().then(s => s.layout)'); return l.edge === 'top' && !l.dragging; });
+  screen.getCursorScreenPoint = realCursor;
+  await until(() => hudEval('getComputedStyle(document.querySelector("#strip")).flexDirection === "row"'));
+  assert.deepEqual(await hudEval('(() => { const s = document.querySelector("#strip"); return [s.offsetTop, s.offsetHeight]; })()'), [3, 30]);
+  await hover('claude');
+  await until(() => hudEval('document.querySelector("#pill").classList.contains("shown") && document.querySelector("#pill").classList.contains("edge-top")'));
+  await sleep(450);
+  await shot('hud-top');
+  checks.push('dragging snaps live to the top edge, the strip turns horizontal and the capsule hangs below');
   // <<more checks>>
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ electron: process.versions.electron, checks }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, output, electron: process.versions.electron }));

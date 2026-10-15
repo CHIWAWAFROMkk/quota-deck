@@ -59,7 +59,12 @@ New-Item -ItemType Directory -Path $appRoot -Force | Out-Null
 $sourceRoot = Join-Path $appRoot 'src'
 New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'src\main') -Destination $sourceRoot -Recurse
-Copy-Item -LiteralPath (Join-Path $projectRoot 'src\renderer') -Destination $sourceRoot -Recurse
+$rendererRoot = Join-Path $sourceRoot 'renderer'
+New-Item -ItemType Directory -Path $rendererRoot -Force | Out-Null
+# Only the HUD, chart and statistics pages ship; git-ignored local prototypes in src\renderer stay out.
+Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src\renderer') -File |
+    Where-Object { $_.Name -match '^(hud[\w-]*|chart|stats)\.(html|css|js)$' } |
+    Copy-Item -Destination $rendererRoot
 Copy-Item -LiteralPath (Join-Path $projectRoot 'assets') -Destination $appRoot -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'package.json') -Destination $appRoot
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $appRoot -Recurse
