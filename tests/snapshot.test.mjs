@@ -4,36 +4,17 @@ import snapshotModule from '../src/main/snapshot.cjs';
 import codexModule from '../src/main/codex-client.cjs';
 import workbuddyModule from '../src/main/workbuddy-client.cjs';
 import antigravityModule from '../src/main/antigravity-client.cjs';
-import orchestratorModule from '../src/main/orchestrator.cjs';
 
 const { health, providerToUi } = snapshotModule;
 const { remainingPercent } = codexModule;
 const { normalizeWorkBuddySnapshot } = workbuddyModule;
 const { normalizeAntigravitySnapshot } = antigravityModule;
-const { parseAgentOutput, rolePrompt } = orchestratorModule;
 
 test('remainingPercent clamps provider values', () => {
   assert.equal(remainingPercent({ usedPercent: 50 }), 50);
   assert.equal(remainingPercent({ usedPercent: 120 }), 0);
   assert.equal(remainingPercent({ usedPercent: -5 }), 100);
   assert.equal(remainingPercent(null), null);
-});
-
-test('collaboration prompt keeps role and shared task explicit', () => {
-  assert.match(rolePrompt('做一份方案', '负责审查'), /做一份方案/);
-  assert.match(rolePrompt('做一份方案', '负责审查'), /负责审查/);
-});
-
-test('agent JSON output parser returns the last useful result', () => {
-  assert.equal(parseAgentOutput('{"result":"first"}\n{"result":"final"}'), 'final');
-});
-
-test('agent parser handles WorkBuddy formatted JSON arrays', () => {
-  const output = JSON.stringify([
-    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'OK' }] },
-    { type: 'result', subtype: 'success', result: 'OK' },
-  ], null, 2);
-  assert.equal(parseAgentOutput(output), 'OK');
 });
 
 test('WorkBuddy keeps model rows tied to one shared credit pool', () => {

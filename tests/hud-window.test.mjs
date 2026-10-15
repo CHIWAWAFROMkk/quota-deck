@@ -7,6 +7,21 @@ import hudWindow from '../src/main/hud-window.cjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+test('setup actions run only for the HUD page and only from the whitelist', async () => {
+  const fake = fakeElectron();
+  const ran = [];
+  const hud = hudWindow.createHud({ settingsPath: await settingsPath(), onRefresh: async () => {}, onAction: async name => { ran.push(name); return { status: 'ok' }; }, electron: fake.electron });
+  const win = fake.windows[0];
+  const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
+  assert.deepEqual(await fake.ipc.handle['hud:action'](event, 'claude-connect'), { status: 'ok' });
+  assert.throws(() => fake.ipc.handle['hud:action'](event, 'collab:run'), /未知操作/);
+  assert.throws(() => fake.ipc.handle['hud:action'](event, { toString: () => 'claude-help' }), /未知操作/);
+  assert.throws(() => fake.ipc.handle['hud:action']({ sender: {}, senderFrame: win.webContents.mainFrame }, 'claude-help'), /不可信/);
+  assert.deepEqual(ran, ['claude-connect']);
+  assert.equal(fake.ipc.handle['hud:open-panel'], undefined);
+  hud.destroy();
+});
+
 class Emitter {
   constructor() { this.handlers = {}; }
   on(name, fn) { (this.handlers[name] ||= []).push(fn); return this; }

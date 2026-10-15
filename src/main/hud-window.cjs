@@ -12,7 +12,8 @@ const TOP_LEVEL = 'normal';
 // decides click-through itself by polling the cursor against the rectangles the page reports.
 const POLL_MS = 40;
 const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card'];
-const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:open-panel'];
+const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action'];
+const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy'];
 
 function loadSettings(file) {
   try { return normalizeHudSettings(JSON.parse(fs.readFileSync(file, 'utf8'))); }
@@ -29,7 +30,7 @@ function saveSettings(file, settings) {
 }
 
 // `electron` is injectable so tests can drive the window logic with fakes.
-function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('electron') }) {
+function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 'ignored' }), electron = require('electron') }) {
   const { BrowserWindow, ipcMain, screen } = electron;
   let settings = loadSettings(settingsPath);
   let win = null;
@@ -164,7 +165,10 @@ function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('e
   const guard = handler => (event, ...args) => { if (!trusted(event)) throw new Error('不可信的请求来源'); return handler(...args); };
   ipcMain.handle('hud:initial', guard(() => ({ items, tokens, layout: layoutMessage() })));
   ipcMain.handle('hud:refresh', guard(async () => { await onRefresh(); return true; }));
-  ipcMain.handle('hud:open-panel', guard(() => { onOpenPanel(); return true; }));
+  ipcMain.handle('hud:action', guard(name => {
+    if (typeof name !== 'string' || !ACTIONS.includes(name)) throw new Error('未知操作');
+    return onAction(name);
+  }));
 
   const onDisplays = () => place();
   screen.on('display-metrics-changed', onDisplays);
@@ -187,6 +191,12 @@ function createHud({ settingsPath, onRefresh, onOpenPanel, electron = require('e
     },
     pushState(next) { items = Array.isArray(next) ? next : []; send('hud:state', items); },
     pushTokens(next) { tokens = next; send('hud:tokens', tokens); },
+    reload() {
+      recoveries = [];
+      if (!alive()) { create(); return; }
+      resetInteraction();
+      win.loadFile(hudEntry).catch(() => {});
+    },
     window: () => (alive() ? win : null),
     destroy() {
       if (drag) { clearInterval(drag.timer); drag = null; }
