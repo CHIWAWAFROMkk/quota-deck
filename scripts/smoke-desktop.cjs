@@ -170,6 +170,23 @@ app.whenReady().then(async () => {
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").hidden'));
   checks.push('settings page: live size and rings, setup guide action, back to the card');
+  await click('claude');
+  await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
+  await hudEval('document.querySelector("#card [data-act=stats]").click()');
+  await until(() => byPage('stats.html'));
+  const statsWindow = byPage('stats.html');
+  const statsEval = code => statsWindow.webContents.executeJavaScript(code);
+  await until(async () => !statsWindow.webContents.isLoading() && await statsEval('document.querySelectorAll(".source").length === 1'));
+  assert.equal(statsWindow.webContents.getLastWebPreferences().sandbox, true);
+  assert.deepEqual(await statsEval('[...document.querySelectorAll(".models tbody td:first-child")].map(td => td.textContent)'), ['Opus 5.5', 'Fable 5.1']);
+  assert.equal(await statsEval('document.querySelectorAll(".axis span").length'), 5);
+  await until(() => statsEval('document.querySelectorAll(".chart .col rect").length > 0'));
+  fs.writeFileSync(path.join(output, 'stats.png'), (await statsWindow.webContents.capturePage()).toPNG());
+  statsWindow.close();
+  await until(() => !byPage('stats.html'));
+  await until(() => hudEval('document.querySelector("#card").hidden || !document.querySelector("#card").classList.contains("shown")'));
+  if (await hudEval('!document.querySelector("#card").hidden')) await hudEval('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+  checks.push('statistics window: sandboxed, per-model table, time axis');
   // <<more checks>>
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ electron: process.versions.electron, checks }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, output, electron: process.versions.electron }));

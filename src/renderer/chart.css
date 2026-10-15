@@ -4,6 +4,7 @@
 .chart .col { transition: opacity 0.15s ease; }
 .chart.hovering .col:not(.on) { opacity: 0.55; }
 .chart .band { fill: rgba(255, 255, 255, 0.08); }
+.chart:not(.hovering) .band, .chart:not(.hovering) .cursor { display: none; }
 .chart .cursor { stroke: rgba(152, 152, 157, 0.5); stroke-width: 1; }
 .chart .baseline { stroke: rgba(255, 255, 255, 0.10); stroke-width: 1; }
 .chart.with-axis { padding-bottom: 18px; }
@@ -12,6 +13,7 @@
 .axis span:first-child { transform: none; }
 .axis span:last-child { transform: translateX(-100%); }
 .chart-tip { position: absolute; bottom: 6px; z-index: 5; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #282828; border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.2); pointer-events: none; }
+.chart-tip[hidden] { display: none; }
 .tip-period { font-size: 11px; color: #98989d; }
 .tip-total { font-size: 14px; font-weight: 600; color: #f5f5f7; }
 .tip-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #f5f5f7; }
