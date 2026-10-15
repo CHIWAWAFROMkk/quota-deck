@@ -157,8 +157,16 @@
       onDragStart();
       window.hud.drag('start');
     }
+    // A drag must always end: a lost capture or a press that arrives while one is still open closes it.
+    function endPress() {
+      if (!press) return;
+      clearTimeout(press.hold);
+      if (press.dragging) window.hud.drag('end');
+      press = null;
+    }
     root.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
+      endPress();
       press = { x: event.screenX, y: event.screenY, at: performance.now(), id: event.target.closest('.item')?.dataset.id || null, dragging: false, hold: setTimeout(startDrag, HOLD_MS) };
       try { root.setPointerCapture(event.pointerId); } catch { /* synthetic events have no capture */ }
     });
@@ -174,10 +182,8 @@
       if (done.dragging) window.hud.drag('end');
       else if (done.id && isClick({ dx: event.screenX - done.x, dy: event.screenY - done.y, ms: performance.now() - done.at })) onClick(done.id);
     });
-    root.addEventListener('pointercancel', () => {
-      if (press) { clearTimeout(press.hold); if (press.dragging) window.hud.drag('end'); }
-      press = null;
-    });
+    root.addEventListener('pointercancel', endPress);
+    root.addEventListener('lostpointercapture', () => { if (press?.dragging) endPress(); });
 
     return {
       setItems(next) { items = Array.isArray(next) ? next : []; render(); },

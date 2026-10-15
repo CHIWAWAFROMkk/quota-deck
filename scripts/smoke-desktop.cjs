@@ -36,7 +36,7 @@ const opened = [];
 shell.openPath = async target => { opened.push(target); return ''; };
 shell.openExternal = async target => { opened.push(target); };
 const checks = [];
-const watchdog = setTimeout(() => { console.error('Desktop smoke timed out'); app.exit(1); }, 60000);
+const watchdog = setTimeout(() => { console.error('Desktop smoke timed out'); app.exit(1); }, 120000);
 require(path.join(root, 'src/main/main.cjs'));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) {
@@ -209,6 +209,20 @@ app.whenReady().then(async () => {
   await sleep(450);
   await shot('hud-top');
   checks.push('dragging snaps live to the top edge, the strip turns horizontal and the capsule hangs below');
+  const dragging = async () => (await hudEval('hud.initial().then(s => s.layout)')).dragging;
+  const pressAndMove = () => hudEval(`(() => { const s = document.querySelector('#strip');
+    s.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10, pointerId: 1 }));
+    s.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, screenX: 40, screenY: 10, pointerId: 1 })); })()`);
+  await pressAndMove();
+  await until(dragging);
+  await hudEval('document.querySelector("#strip").dispatchEvent(new PointerEvent("lostpointercapture", { pointerId: 1 }))');
+  await until(async () => !(await dragging()));
+  await pressAndMove();
+  await until(dragging);
+  await hudEval(`document.querySelector('#strip').dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10, pointerId: 2 }))`);
+  await until(async () => !(await dragging()));
+  await hudEval(`document.querySelector('#strip').dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true, screenX: 10, screenY: 10, pointerId: 2 }))`);
+  checks.push('a lost pointer capture or a fresh press ends a stuck drag');
   // <<more checks>>
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ electron: process.versions.electron, checks }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, output, electron: process.versions.electron }));
