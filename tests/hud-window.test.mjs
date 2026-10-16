@@ -221,3 +221,58 @@ test('an invalid value in a settings patch is ignored and the current value kept
     hud.destroy();
   }
 });
+
+test('sessions are pushed and re-sent after the renderer reloads', async () => {
+  const { fake, hud, win, event } = await setup();
+  try {
+    const initial = await fake.ipc.handle['hud:initial'](event);
+    assert.deepEqual(initial.sessions, { vendors: { claude: { phase: 'idle', running: 0 }, codex: { phase: 'idle', running: 0 } }, alerts: [] });
+    const snapshot = { vendors: { claude: { phase: 'done', running: 0 }, codex: { phase: 'idle', running: 0 } }, alerts: [{ id: 'synthetic-reply', kind: 'reply', vendor: 'claude' }] };
+    hud.pushSessions(snapshot);
+    assert.deepEqual(win.last('hud:sessions'), snapshot);
+    hud.hide();
+    hud.reload();
+    win.sent.length = 0;
+    win.webContents.emit('did-finish-load');
+    assert.deepEqual(win.last('hud:sessions'), snapshot);
+    assert.deepEqual((await fake.ipc.handle['hud:initial'](event)).sessions, snapshot);
+    hud.show();
+    assert.deepEqual(win.last('hud:sessions'), snapshot);
+  } finally { hud.destroy(); }
+});
+
+test('dismiss accepts only a bounded string list from the HUD page', async () => {
+  const received = [];
+  const { fake, hud, win, event } = await setup({ onDismiss: ids => received.push(ids) });
+  try {
+    for (const untrusted of [
+      { sender: {}, senderFrame: win.webContents.mainFrame },
+      { sender: win.webContents, senderFrame: { url: win.webContents.mainFrame.url } },
+    ]) fake.ipc.on['hud:dismiss'](untrusted, ['ignored']);
+    for (const bad of [null, 'id', {}, 5]) fake.ipc.on['hud:dismiss'](event, bad);
+    assert.deepEqual(received, []);
+    fake.ipc.on['hud:dismiss'](event, ['valid', 1, null, {}, 'x'.repeat(201), 'y'.repeat(200), ...Array.from({ length: 60 }, (_, n) => `id-${n}`)]);
+    assert.equal(received.length, 1);
+    assert.equal(received[0].length, 50);
+    assert.deepEqual(received[0].slice(0, 3), ['valid', 'y'.repeat(200), 'id-0']);
+    const url = win.webContents.mainFrame.url;
+    win.webContents.mainFrame.url = 'https://example.test/';
+    fake.ipc.on['hud:dismiss'](event, ['ignored']);
+    win.webContents.mainFrame.url = url;
+    assert.equal(received.length, 1);
+  } finally { hud.destroy(); }
+});
+
+test('return asks the main process and is refused for untrusted senders', async () => {
+  const received = [];
+  const { fake, hud, win, event } = await setup({ onReturn: async id => { received.push(id); return { status: 'opened' }; } });
+  try {
+    assert.deepEqual(await fake.ipc.handle['hud:return'](event, 'reply-id'), { status: 'opened' });
+    for (const bad of [null, {}, 1, 'x'.repeat(201)]) assert.deepEqual(await fake.ipc.handle['hud:return'](event, bad), { status: 'unavailable' });
+    for (const untrusted of [
+      { sender: {}, senderFrame: win.webContents.mainFrame },
+      { sender: win.webContents, senderFrame: { url: win.webContents.mainFrame.url } },
+    ]) assert.throws(() => fake.ipc.handle['hud:return'](untrusted, 'reply-id'), /不可信/);
+    assert.deepEqual(received, ['reply-id']);
+  } finally { hud.destroy(); }
+});
