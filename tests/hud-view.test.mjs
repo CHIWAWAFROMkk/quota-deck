@@ -119,6 +119,8 @@ test('balances that cannot be parsed stay unknown', () => {
   assert.equal(odd.label, '–');
   assert.deepEqual(odd.ring, { usedPct: null, level: 'none', dashed: false });
   assert.equal(odd.card.balance, null);
+  assert.deepEqual(odd.pill, [{ name: 'Balance', value: '—', level: 'none' }]);
+  assert.equal(odd.card.note, 'Balance is in a currency the HUD cannot show yet.');
 });
 
 test('token data gets per-hour and per-day texts', () => {

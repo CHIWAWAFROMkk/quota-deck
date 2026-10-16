@@ -155,11 +155,13 @@ function buildHudItems(ui, now = Date.now()) {
     let pill;
     if (rows.length) pill = rows.map(row => ({ name: row.short, value: row.usedPct === null ? '—' : `${row.usedPct}%`, level: row.level }));
     else if (balance) pill = [{ name: 'Balance', value: balance.text, level: balance.level }];
+    else if (gauge.kind === 'balance' && (state === 'live' || stale)) pill = [{ name: 'Balance', value: '—', level: 'none' }];
     else if (gauge.kind === 'ratio' && ring.usedPct !== null) pill = [{ name: 'Used', value: label, level: ring.level }];
     else pill = [{ name: '', value: state === 'error' ? 'Error' : state === 'disconnected' ? 'Not connected' : NAMES[id], level: 'none' }];
     const note = state === 'error' ? 'Could not read usage. Check sign-in or network.'
       : state === 'disconnected' ? SETUP_NOTES[id]
-        : stale ? 'Showing the last reading.' : '';
+        : gauge.kind === 'balance' && !balance ? 'Balance is in a currency the HUD cannot show yet.'
+          : stale ? 'Showing the last reading.' : '';
     return {
       id, name: NAMES[id], label, state, setup: p.setupAction || null, ring, pill,
       card: {
