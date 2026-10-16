@@ -2,6 +2,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
+const { readLatestCodexLimits } = require('./codex-rollout-limits.cjs');
 
 function findCodexBinary() {
   const appData = process.env.APPDATA;
@@ -158,7 +159,7 @@ async function readModelPages(client) {
   throw new Error('Codex 模型目录分页过多');
 }
 
-async function readCodexSnapshot(client = new CodexRpcClient()) {
+async function readCodexSnapshot(client = new CodexRpcClient(), { fallback = readLatestCodexLimits } = {}) {
   try {
     await client.start();
     const [account, limits, models] = await Promise.all([
@@ -204,6 +205,29 @@ async function readCodexSnapshot(client = new CodexRpcClient()) {
       models: modelRows,
       note: '未显示独立额度的模型共用 Codex 账户额度，不进行虚假拆分。',
     };
+  } catch (error) {
+    try {
+      const limits = await fallback();
+      if (limits) {
+        const remainingWindows = [remainingPercent(limits.primary), remainingPercent(limits.secondary)].filter(Number.isFinite);
+        return {
+          id: 'codex',
+          name: 'Codex',
+          status: 'stale',
+          remainingPercent: remainingWindows.length ? Math.min(...remainingWindows) : null,
+          source: '本机日志',
+          precision: 'local-log',
+          updatedAt: new Date(limits.at).toISOString(),
+          planType: limits.planType,
+          windows: [windowView(limits.primary, '主窗口'), windowView(limits.secondary, '周窗口')].filter(Boolean),
+          models: [],
+          note: 'Codex 本机服务未响应，显示 Codex 日志里最近一次记录的额度。',
+        };
+      }
+    } catch {
+      // Keep the original app-server error when the local log cannot be read.
+    }
+    throw error;
   } finally {
     client.close();
   }
