@@ -33,7 +33,16 @@ function windowNames(providerId, label, pool) {
   if (text === '5 小时') { name = providerId === 'claude' ? 'Current session' : '5h limit'; short = '5h'; }
   else if (text === '每周') { name = providerId === 'claude' ? 'Weekly' : 'Weekly limit'; short = 'Weekly'; }
   else if (model) { name = `Weekly limit · ${model}`; short = model; }
-  else { name = text || 'Limit'; short = name; }
+  else {
+    const known = new Map([
+      ['窗口', ['Limit', 'Limit']],
+      ['未知窗口', ['Limit', 'Limit']],
+      ['旧版窗口', ['Legacy limit', 'Legacy']],
+      ['Gateway 支出', ['Gateway spend', 'Spend']],
+    ]).get(text);
+    name = known?.[0] ?? (/[\u3400-\u9fff]/.test(text) ? 'Limit' : text || 'Limit');
+    short = known?.[1] ?? name;
+  }
   return pool ? { name: `${pool} · ${short}`, short: `${pool} ${short}` } : { name, short };
 }
 
