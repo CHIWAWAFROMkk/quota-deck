@@ -13,6 +13,8 @@ const PAIRS = [
   ['f087.png', 'hud-card-burn.png', '7.0s · card, burn rate'],
   ['f102.png', 'hud-tooltip.png', '8.0s · token tooltip'],
   ['f281.png', 'hud-top.png', '21.1s · top edge'],
+  ['f184.png', 'hud-reply-pill.png', '14.1s · New reply capsule'],
+  ['f207.png', 'hud-reply-card.png', '16.0s · reply card'],
 ];
 
 app.whenReady().then(async () => {

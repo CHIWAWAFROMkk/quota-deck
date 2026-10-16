@@ -233,7 +233,8 @@ app.whenReady().then(async () => {
   await click('claude');
   await until(() => hudEval(`${blocks}.length === 2`));
   assert.deepEqual(await hudEval(`${blocks}.map(b => b.querySelector('.alert-title').textContent)`), ['Build the iOS dashboard 1', 'Build the iOS dashboard 2']);
-  assert.match(await hudEval(`${blocks}[0].querySelector('.alert-meta').textContent`), /^\d\d:\d\d · 3m$/);
+  assert.match(await hudEval(`${blocks}[0].querySelector('.alert-time').textContent`), /^\d\d:\d\d$/);
+  assert.equal(await hudEval(`${blocks}[0].querySelector('.alert-duration').textContent`), '3m');
   assert.equal(await hudEval(`${blocks}.filter(b => b.textContent.includes('Return to session')).length`), 2);
   assert.equal(await hudEval(`${blocks}[0].textContent.includes('Fable 5.1') && ${blocks}[0].textContent.includes('The dashboard builds')`), true);
   await sleep(450);

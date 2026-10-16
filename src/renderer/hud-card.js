@@ -150,21 +150,19 @@
         el('span', { class: `alert-chip ${alert.kind}` }, [waiting ? null : icon('chat'), el('span', { text: label })]),
         waiting ? null : el('button', { class: 'alert-x', type: 'button', 'data-act': 'dismiss', 'data-id': alert.id, 'aria-label': 'Dismiss', title: 'Dismiss' }, [icon('close')]),
       ]);
-      const meta = waiting
-        ? `Waiting ${sinceOf(Number(alert.at) || Date.now())}`
-        : [clockOf(Number(alert.at)), durationOf(Number(alert.durationMs))].filter(Boolean).join(' · ');
+      const when = waiting ? `Waiting ${sinceOf(Number(alert.at) || Date.now())}` : clockOf(Number(alert.at));
+      const took = waiting ? '' : durationOf(Number(alert.durationMs));
       return el('section', { class: `alert-block ${alert.kind || 'reply'}`, 'data-id': alert.id }, [
         head,
         el('h3', { class: 'alert-title', text: alert.title || item.name }),
         waiting ? el('p', { class: 'alert-status', text: 'Waiting for you' }) : error ? el('p', { class: 'alert-status', text: 'Stopped with an error' }) : null,
         waiting && alert.tool ? el('p', { class: 'alert-tool', text: String(alert.tool) }) : null,
         !waiting && alert.text ? el('p', { class: 'alert-summary', text: String(alert.text) }) : null,
+        // Video layout: time and duration on one line, then the two actions.
+        el('div', { class: 'alert-meta' }, [el('span', { class: 'alert-time', text: when }), el('span', { class: 'alert-duration', text: took })]),
         el('footer', { class: 'alert-foot' }, [
-          el('span', { class: 'alert-meta', text: meta }),
-          el('span', { class: 'alert-actions' }, [
-            el('button', { class: 'alert-link', type: 'button', 'data-act': 'usage', text: 'View token usage' }),
-            alert.returnable === true ? el('button', { class: 'alert-return', type: 'button', 'data-act': 'return', 'data-id': alert.id, text: 'Return to session' }) : null,
-          ]),
+          el('button', { class: 'alert-link', type: 'button', 'data-act': 'usage' }, [icon('chart'), el('span', { text: 'View token usage' })]),
+          alert.returnable === true ? el('button', { class: 'alert-return', type: 'button', 'data-act': 'return', 'data-id': alert.id }, [icon('arrow'), el('span', { text: 'Return to session' })]) : null,
         ]),
       ]);
     }

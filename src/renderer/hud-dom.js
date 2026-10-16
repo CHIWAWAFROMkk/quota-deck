@@ -28,6 +28,7 @@
     back: ['stroke', [['path', { d: 'M10 3 5 8l5 5' }]]],
     chat: ['stroke', [['path', { d: 'M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z' }], ['path', { d: 'M5 6.5h6M5 8.8h4' }]]],
     close: ['stroke', [['path', { d: 'M4.5 4.5l7 7M11.5 4.5l-7 7' }]]],
+    arrow: ['stroke', [['path', { d: 'M5 11 11 5M6.5 5H11v4.5' }]]],
   };
   function icon(name) {
     const [kind, body] = ICONS[name];

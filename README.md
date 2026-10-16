@@ -25,6 +25,14 @@ Windows 桌面 AI 额度显示器与本地 Agent 并行任务入口。使用 Ele
 - 卡片左下齿轮是设置（尺寸、圆环、数字、复位位置、Claude statusLine 与 WorkBuddy 接入），右下图标打开 24 小时 Token 统计窗口。
 - 按住浮条拖动，它会实时吸到离指针最近的屏幕边，贴上下边时变成横条；松手后位置会记住。托盘菜单「显示 HUD」可开关。
 
+### 做完了提醒
+
+- QuotaDeck 只读本机会话日志（`~/.claude/projects`、`~/.codex/sessions`），不改 Claude Code 或 Codex 的任何配置。
+- Claude Code（VS Code 插件或终端）或 Codex 桌面版做完一轮，几秒内图标变成笑脸 bot，旁边伸出 `New reply`；在跑时是 working 的 bot，出错停下写 `Stopped`。
+- 提醒一直留到你看过：关上卡片、点 ×、点 `Return to session`，或在那个会话里发新消息。`Return to session` 会打开 VS Code 里对应的 Claude 对话（`vscode://anthropic.claude-code/open?session=…`），或 Codex 桌面版（`codex://threads/…`）。
+- `Waiting` 是推测：某个工具调用超过 30 秒还没结果，就当作可能在等你批准。很长的命令（比如编译）也会被这样标出来。
+- 只提醒你自己开的会话：Codex 只看桌面版里的会话，`codex exec` 和子代理不提醒；Claude 不提醒 `-p` / SDK 自动跑的会话。回复内容只在内存里，不写盘。
+
 ## 运行
 
 Windows 11、Node.js 22+、PowerShell 7。先安装并登录需要使用的 Agent CLI。
