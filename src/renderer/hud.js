@@ -13,8 +13,10 @@
 
   // Tell the main process where the visible parts are; it turns click-through off only over them.
   function reportHits() {
-    const rects = [...document.querySelectorAll('.hit')].filter(node => !node.hidden).map(node => node.getBoundingClientRect())
-      .map(r => ({ x: Math.floor(r.left), y: Math.floor(r.top), width: Math.ceil(r.width), height: Math.ceil(r.height) }));
+    // Layout boxes, not getBoundingClientRect: the card is still scaled down while it opens,
+    // and clicks on its final area must not fall through to the window below.
+    const rects = [...document.querySelectorAll('.hit')].filter(node => !node.hidden)
+      .map(node => ({ x: node.offsetLeft, y: node.offsetTop, width: node.offsetWidth, height: node.offsetHeight }));
     const key = JSON.stringify(rects);
     if (key === lastHits) return;
     lastHits = key;

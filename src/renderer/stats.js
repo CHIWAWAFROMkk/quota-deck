@@ -26,8 +26,8 @@
     if (!sources.length) { root.replaceChildren(el('p', { class: 'empty', text: 'No token data in the last 24h' })); return; }
     root.replaceChildren(...sources.map(([id, series]) => el('section', { class: 'source' }, [
       el('header', { class: 'source-head' }, [logo(id, 'source-logo'), el('h2', { text: NAMES[id] }), el('span', { class: 'source-total', text: `${fmtInt(series.total)} tokens${series.partial ? ' · partial' : ''}` })]),
-      window.HudChart.render(series, { height: 120, source: id, axis: true }),
-      table(series),
+      Array.isArray(series.buckets) && series.buckets.length && Number.isFinite(series.startAt) ? window.HudChart.render(series, { height: 120, source: id, axis: true }) : null,
+      Array.isArray(series.models) && series.models.length ? table(series) : null,
     ])));
   }
 

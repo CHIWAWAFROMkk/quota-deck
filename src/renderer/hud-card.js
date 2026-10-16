@@ -12,8 +12,13 @@
     let view = 'detail';
     let closeTimer = null;
     let settingsUpdate = null;
+    // While the pointer is on the card a data push waits, so a tooltip being read is not torn down.
+    let hovering = false;
+    let pendingRender = false;
 
     const edgeNow = () => EDGES.find(edge => document.body.classList.contains(`edge-${edge}`)) || 'right';
+    // A ledger needs its quarter-hour buckets and start time to be drawn; older ones only have a total.
+    const drawable = s => s?.status === 'ok' && s.total > 0 && Array.isArray(s.buckets) && s.buckets.length > 0 && Number.isFinite(s.startAt);
     const tokenMeta = s => (!s ? 'Reading…' : s.status === 'unsupported' ? 'No local logs' : s.status !== 'ok' ? 'Read failed' : s.partial ? '24h · partial' : `24h · ${s.totalText ?? `${window.HudDom.fmtInt(s.total || 0)} tok`}`);
     // Backward compatible: older rows carry `label` and a burn string instead of an object.
     const burnOf = row => (row.burn && typeof row.burn === 'object' ? row.burn : { value: typeof row.burn === 'string' ? row.burn : '—', level: 'none', detail: '', projectedPct: null });
@@ -62,6 +67,8 @@
       const metric = getMetric(item.id);
       const tokens = getTokens()?.[item.id];
       const c = item.card;
+      // Backward compatible: older items carry the balance as a plain string.
+      const balance = typeof c.balance === 'string' ? { text: c.balance, level: 'none' } : c.balance && typeof c.balance === 'object' ? { text: c.balance.text ?? '—', level: c.balance.level || 'none' } : null;
       const head = el('section', { class: 'sec' }, [
         el('header', { class: 'head' }, [
           el('span', { class: 'head-logo' }, [logo(item.id, 'card-logo')]),
@@ -72,12 +79,12 @@
         ]),
         el('div', { class: 'account' }, [el('span', { class: 'plan', text: c.plan || '' }), el('span', { class: 'status', text: c.account || '' })]),
         c.note ? el('p', { class: 'note', text: c.note }) : null,
-        c.balance ? el('div', { class: `row ${c.balance.level}` }, [el('i', { class: 'dot' }), el('span', { class: 'name', text: 'Balance' }), el('span'), el('span', { class: 'value', text: c.balance.text }), el('span', { class: 'detail' })]) : null,
+        balance ? el('div', { class: `row ${balance.level}` }, [el('i', { class: 'dot' }), el('span', { class: 'name', text: 'Balance' }), el('span'), el('span', { class: 'value', text: balance.text }), el('span', { class: 'detail' })]) : null,
         ...(c.rows || []).map(row => rowNode(row, metric, tokens)),
       ]);
       const tokenSection = c.tokens ? el('section', { class: 'sec tokens' }, [
         el('div', { class: 'sec-head' }, [el('h3', { text: 'Tokens' }), el('span', { class: 'sec-meta', text: tokenMeta(tokens) })]),
-        tokens?.status === 'ok' && tokens.total > 0 ? window.HudChart.render(tokens, { source: item.id }) : null,
+        drawable(tokens) ? window.HudChart.render(tokens, { source: item.id }) : null,
       ]) : null;
       const foot = el('footer', { class: 'sec foot' }, [
         el('button', { class: 'foot-btn', type: 'button', 'data-act': 'settings', 'aria-label': 'Settings', title: 'Settings' }, [icon('gear')]),
@@ -92,6 +99,10 @@
       if (!mark) return;
       const s = document.querySelector('#strip').getBoundingClientRect();
       const edge = edgeNow();
+      // Cap the height to the room on the strip's inner side; the card scrolls instead of being clipped.
+      const H = document.documentElement.clientHeight;
+      const room = edge === 'top' ? H - s.bottom - GAP - MARGIN : edge === 'bottom' ? s.top - GAP - MARGIN : H - 2 * MARGIN;
+      root.style.maxHeight = `${Math.max(120, Math.floor(room))}px`;
       const w = root.offsetWidth;
       const h = root.offsetHeight;
       const clampX = v => Math.max(MARGIN, Math.min(document.documentElement.clientWidth - w - MARGIN, v));
@@ -129,6 +140,7 @@
       const animate = !openId;
       openId = id;
       view = 'detail';
+      pendingRender = false;
       root.hidden = false;
       root.classList.remove('closing');
       render(animate);
@@ -161,6 +173,12 @@
       if (act === 'stats') onOpenStats();
     });
     root.addEventListener('transitionend', onChange);
+    root.addEventListener('mouseover', () => { hovering = true; });
+    root.addEventListener('mouseleave', () => {
+      hovering = false;
+      if (pendingRender && openId && view === 'detail') render();
+      pendingRender = false;
+    });
     new ResizeObserver(onChange).observe(root);
 
     return {
@@ -169,7 +187,12 @@
       toggle(id) { if (openId === id) close(); else open(id); },
       isOpen: () => openId !== null,
       // The settings page keeps its inputs while values change, so it is only moved, not rebuilt.
-      refresh() { if (!openId) return; if (view === 'settings') { settingsUpdate?.(); position(false); } else render(); },
+      refresh() {
+        if (!openId) return;
+        if (view === 'settings') { settingsUpdate?.(); position(false); return; }
+        if (hovering) { pendingRender = true; return; }
+        render();
+      },
       reposition() { if (openId) position(false); },
     };
   }

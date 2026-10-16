@@ -47,6 +47,9 @@ async function until(fn) {
   throw new Error('Timed out waiting for UI');
 }
 app.whenReady().then(async () => {
+  const { ipcMain } = require('electron');
+  let lastHits = [];
+  ipcMain.on('hud:hits', (_event, rects) => { lastHits = rects; });
   const byPage = name => BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith(name));
   await until(() => byPage('hud.html'));
   const hudWindow = byPage('hud.html');
@@ -88,7 +91,9 @@ app.whenReady().then(async () => {
   await until(() => hudEval('document.querySelector("#pill").hidden'));
   checks.push('hover capsule after 400ms, follows marks, hides after leaving');
 
-  await hudEval('hud.setSettings({ showsNumbers: false })');
+  const gapNow = await hudEval(`hud.setSettings({ showsNumbers: false }).then(() => new Promise(r => setTimeout(r, 0))).then(() => {
+    const s = document.querySelector('#strip'); return document.documentElement.clientWidth - s.offsetLeft - s.offsetWidth; })`);
+  assert.equal(gapNow, 3, 'the strip stays flush to the right edge before the main process relays out');
   await until(() => hudEval('document.querySelector("#strip").offsetWidth === 32'));
   await hudEval('hud.setSettings({ showsNumbers: true })');
   await until(() => hudEval('document.querySelector("#strip").offsetWidth > 60'));
@@ -147,6 +152,35 @@ app.whenReady().then(async () => {
   await click('codex');
   await until(() => hudEval('document.querySelector("#card").hidden'));
   checks.push('card closes on Esc and on a second click; missing logs are labelled');
+
+  await click('claude');
+  await sleep(40);
+  assert.ok(lastHits.some(r => r.width >= 439), 'the card is clickable as soon as it starts opening');
+  await until(() => hudEval('document.querySelectorAll("#card .chart .col rect").length > 0'));
+  await hudEval(`(() => { const svg = document.querySelector('#card .chart svg'); const r = svg.getBoundingClientRect();
+    svg.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: r.left + r.width * (27.5 / 96), clientY: r.top + 10 }));
+    svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: r.left + r.width * (27.5 / 96), clientY: r.top + 10 })); })()`);
+  await until(() => hudEval('!document.querySelector("#card .chart-tip").hidden'));
+  const liveTokens = await hudEval('hud.initial().then(s => s.tokens)');
+  hudWindow.webContents.send('hud:tokens', liveTokens);
+  await sleep(150);
+  assert.equal(await hudEval('!document.querySelector("#card .chart-tip").hidden'), true, 'a data push does not close the tooltip being read');
+  await hudEval('document.querySelector("#card").dispatchEvent(new MouseEvent("mouseleave"))');
+  await until(() => hudEval('document.querySelector("#card .chart-tip").hidden'));
+  const liveItems = await hudEval('hud.initial().then(s => s.items)');
+  const legacyItems = JSON.parse(JSON.stringify(liveItems));
+  legacyItems.find(item => item.id === 'claude').card.balance = '¥8.85';
+  hudWindow.webContents.send('hud:state', legacyItems);
+  hudWindow.webContents.send('hud:tokens', { claude: { status: 'ok', total: 5000 } });
+  await until(() => hudEval('[...document.querySelectorAll("#card .row .name")].some(n => n.textContent === "Balance")'));
+  assert.equal(await hudEval('[...document.querySelectorAll("#card .row")].find(r => r.querySelector(".name").textContent === "Balance").querySelector(".value").textContent'), '¥8.85');
+  assert.equal(await hudEval('/undefined/.test(document.querySelector("#card").innerHTML) || /NaN|undefined/.test(document.querySelector("#card").innerText)'), false);
+  assert.equal(await hudEval('document.querySelector("#card .tokens .sec-meta").textContent'), '24h · 5,000 tok');
+  hudWindow.webContents.send('hud:state', liveItems);
+  hudWindow.webContents.send('hud:tokens', liveTokens);
+  await click('claude');
+  await until(() => hudEval('document.querySelector("#card").hidden'));
+  checks.push('card: clickable while opening, keeps a hovered tooltip across pushes, tolerates legacy balance and ledger');
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
   await hudEval('document.querySelector("#card [data-act=settings]").click()');
@@ -220,6 +254,17 @@ app.whenReady().then(async () => {
   await sleep(450);
   await shot('hud-top');
   checks.push('dragging snaps live to the top edge, the strip turns horizontal and the capsule hangs below');
+  await hudEval('document.querySelector("#strip").dispatchEvent(new MouseEvent("mouseleave"))');
+  await click('claude');
+  await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
+  await hudEval('document.querySelector("#card [data-act=settings]").click()');
+  await until(() => hudEval('document.querySelector("#card h2")?.textContent === "Settings"'));
+  const room = await hudEval(`(() => { const c = document.querySelector('#card'); const s = document.querySelector('#strip').getBoundingClientRect();
+    return { max: parseFloat(getComputedStyle(c).maxHeight), room: document.documentElement.clientHeight - s.bottom - 6 - 4 }; })()`);
+  assert.equal(Math.round(room.max), Math.round(room.room), 'at the top edge the card is capped to the room below the strip');
+  await click('claude');
+  await until(() => hudEval('document.querySelector("#card").hidden'));
+  checks.push('card height is capped to the room on the inner side of a top-docked strip');
   const dragging = async () => (await hudEval('hud.initial().then(s => s.layout)')).dragging;
   const pressAndMove = () => hudEval(`(() => { const s = document.querySelector('#strip');
     s.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10, pointerId: 1 }));
