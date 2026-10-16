@@ -8,7 +8,7 @@ const CHUNK = 64 * 1024;
 function createSessionWatcher({ tracker, onChange,
   claudeRoot = path.join(os.homedir(), '.claude', 'projects'),
   codexRoot = path.join(os.homedir(), '.codex', 'sessions'),
-  fileSystem = fs, clock = Date.now, pollMs = 1500, scanMs = 60000,
+  fileSystem = fs, clock = Date.now, pollMs = 1500, scanMs = 5000,
   activeWindowMs = 1800000, tailBytes = 262144, headBytes = 65536,
 }) {
   const files = new Map();

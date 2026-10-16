@@ -293,3 +293,24 @@ test('stop during startup prevents timers from being installed later', async t =
     assert.equal(s.changes.length, 0);
   } finally { release(); s.watcher.stop(); t.mock.timers.reset(); }
 });
+
+test('new session files are found within 5 seconds by default', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let scans = 0;
+  const watcher = watcherModule.createSessionWatcher({
+    tracker: { ingest() {}, snapshot: () => ({ vendors: {}, alerts: [] }) },
+    onChange() {},
+    claudeRoot: path.resolve('work/does-not-exist-claude'),
+    codexRoot: path.resolve('work/does-not-exist-codex'),
+    fileSystem: { ...fs, readdir: async (...args) => { scans++; return fs.readdir(...args); } },
+  });
+  try {
+    await watcher.start();
+    const afterStart = scans;
+    t.mock.timers.tick(5000);
+    for (let i = 0; i < 20 && scans === afterStart; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(scans > afterStart, 'a rescan ran within 5 s');
+  } finally {
+    watcher.stop();
+  }
+});
