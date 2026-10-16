@@ -145,3 +145,25 @@ test('missing or elapsed resets suppress burn estimates for every rate and usage
     }
   }
 });
+
+test('unknown or Chinese window labels never leak into the English HUD', () => {
+  const windows = ['窗口', '未知窗口', '旧版窗口', 'Gateway 支出', 'Burst'].map(label => ({ label, remainingPercent: 50 }));
+  const provider = { id: 'codex', status: 'healthy', gauge: { kind: 'window', remainingPercent: 50, windows } };
+  const entry = item({ providers: [provider] }, 'codex');
+  assert.deepEqual(entry.card.rows.map(row => row.name), ['Limit', 'Limit', 'Legacy limit', 'Gateway spend', 'Burst']);
+  assert.deepEqual(entry.card.rows.map(row => row.short), ['Limit', 'Limit', 'Legacy', 'Spend', 'Burst']);
+  assert.deepEqual(entry.pill.map(p => p.name), ['Limit', 'Limit', 'Legacy', 'Spend', 'Burst']);
+
+  const unknown = item({ providers: [{ ...provider, gauge: { ...provider.gauge, windows: [{ label: '某个新窗口', remainingPercent: 50 }] } }] }, 'codex');
+  assert.equal(unknown.card.rows[0].name, 'Limit');
+  assert.equal(unknown.card.rows[0].short, 'Limit');
+  assert.equal(unknown.pill[0].name, 'Limit');
+
+  for (const current of [entry, unknown]) {
+    for (const row of current.card.rows) {
+      assert.doesNotMatch(row.name, /[\u3400-\u9fff]/);
+      assert.doesNotMatch(row.short, /[\u3400-\u9fff]/);
+    }
+    for (const pill of current.pill) assert.doesNotMatch(pill.name, /[\u3400-\u9fff]/);
+  }
+});
