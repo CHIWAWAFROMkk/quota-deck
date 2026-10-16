@@ -86,7 +86,30 @@ test('codex turn lifecycle with tool calls', () => {
     { kind: 'turn-end', at: at + 8000, sessionId, text: 'Finished', error: false, durationMs: 8000, model: 'gpt-6' },
   ]);
   assert.deepEqual(parser.parse(codex('event_msg', { type: 'turn_aborted' })), [{ kind: 'interrupt', at, sessionId }]);
-  assert.deepEqual(parser.parse(codex('event_msg', { type: 'task_complete', error: 'failed' })), [{ kind: 'turn-end', at, sessionId, text: '', error: true, durationMs: null, model: 'gpt-6' }]);
+  assert.deepEqual(parser.parse(codex('event_msg', { type: 'task_complete', error: 'failed' })), [{ kind: 'turn-end', at, sessionId, text: 'failed', error: true, durationMs: null, model: 'gpt-6' }]);
+});
+
+test('codex error turns carry the error message as text', () => {
+  const parser = codexParser();
+  const long = 'e'.repeat(3000);
+  for (const [last_agent_message, error, expected] of [
+    [null, { message: 'Synthetic object error', codex_error_info: 'synthetic' }, 'Synthetic object error'],
+    [undefined, { message: 'Synthetic missing reply' }, 'Synthetic missing reply'],
+    ['', { message: 'Synthetic empty reply' }, 'Synthetic empty reply'],
+    [null, 'Synthetic string error', 'Synthetic string error'],
+    ['', 'Synthetic string error', 'Synthetic string error'],
+    [null, { message: long }, long.slice(0, 2048)],
+    [null, long, long.slice(0, 2048)],
+    ['Agent reply', { message: 'Synthetic error' }, 'Agent reply'],
+    ['Agent reply', 'Synthetic error', 'Agent reply'],
+    [null, { message: 123 }, ''],
+    [null, true, ''],
+    [null, [{ message: 'Not an error object' }], ''],
+  ]) {
+    assert.deepEqual(parser.parse(codex('event_msg', { type: 'task_complete', last_agent_message, error })), [
+      { kind: 'turn-end', at, sessionId, text: expected, error: true, durationMs: null, model: null },
+    ]);
+  }
 });
 
 test('codex user text skips environment context', () => {
