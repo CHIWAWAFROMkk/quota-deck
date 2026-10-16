@@ -314,3 +314,21 @@ test('new session files are found within 5 seconds by default', async (t) => {
     watcher.stop();
   }
 });
+
+test('real Codex layouts: the first prompt and model sit 65-150 KB in and are still found', async () => {
+  const s = await setup();
+  const t = s.now() - 60000;
+  const meta = x(t, 'session_meta', { id: '22222222-3333-4444-5555-666666666666', originator: 'Codex Desktop', thread_source: 'user', base_instructions: 'b'.repeat(22000) });
+  const developer = n => x(t, 'response_item', { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'd'.repeat(n) }] });
+  const prompt = x(t, 'response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Ship the Codex reply card' }] });
+  const context = x(t + 1, 'turn_context', { model: 'gpt-6-astra' });
+  const filler = x(t + 2, 'response_item', { type: 'reasoning', summary: [], content: 'r'.repeat(300000) });
+  const done = x(s.now(), 'event_msg', { type: 'task_complete', turn_id: 'turn-1', last_agent_message: 'Done', duration_ms: 5000 });
+  const body = meta + developer(70000) + prompt + developer(60000) + context + x(t + 1, 'event_msg', { type: 'task_started', turn_id: 'turn-1' }) + filler + done;
+  await s.write(path.join(s.codexRoot, '2026', '10', '16', 'rollout-real.jsonl'), body);
+  await s.watcher.rescan();
+  await s.watcher.tick();
+  const [alert] = s.changes.at(-1).alerts;
+  assert.equal(alert.title, 'Ship the Codex reply card');
+  assert.equal(alert.model, 'GPT-6 Astra');
+});
