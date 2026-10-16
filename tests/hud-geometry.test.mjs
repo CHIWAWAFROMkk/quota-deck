@@ -88,3 +88,10 @@ test('the pointer is over a hit area only inside its rectangle plus a small marg
   assert.equal(geometry.pointerOverHits({ cursor: { x: 1280 + 100, y: 45 + 100 }, bounds, hits }), false);
   assert.equal(geometry.pointerOverHits({ cursor: { x: 1280 + 550, y: 45 + 250 }, bounds, hits: [] }), false);
 });
+
+test('isValidSetting accepts exactly what normalizeHudSettings keeps', () => {
+  const valid = [['size', 16], ['size', 40], ['ringWidth', 1], ['ringWidth', 2.3], ['ringWidth', 4], ['showsRings', false], ['showsNumbers', true], ['metrics', { claude: 'burn' }]];
+  const invalid = [['size', 15], ['size', 41], ['size', 22.5], ['size', 'abc'], ['ringWidth', 0.5], ['ringWidth', 9], ['ringWidth', NaN], ['showsRings', 'yes'], ['showsNumbers', 1], ['metrics', ['burn']], ['metrics', null], ['edge', 'top']];
+  for (const [key, value] of valid) assert.equal(geometry.isValidSetting(key, value), true, `${key}=${JSON.stringify(value)}`);
+  for (const [key, value] of invalid) assert.equal(geometry.isValidSetting(key, value), false, `${key}=${JSON.stringify(value)}`);
+});

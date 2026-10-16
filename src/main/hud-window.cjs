@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { isTrustedRenderer } = require('./security.cjs');
-const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
+const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, isValidSetting, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
 
 const hudEntry = path.join(__dirname, '..', 'renderer', 'hud.html');
 const DRAG_LIMIT_MS = 60_000;
@@ -134,8 +134,9 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
     const merged = { ...settings };
     for (const key of SETTING_KEYS) {
-      if (!Object.hasOwn(p, key)) continue;
-      merged[key] = key === 'metrics' ? { ...settings.metrics, ...(p.metrics && typeof p.metrics === 'object' ? p.metrics : {}) } : p[key];
+      // An invalid entry is ignored so the current value stays; the rest of the patch still applies.
+      if (!Object.hasOwn(p, key) || !isValidSetting(key, p[key])) continue;
+      merged[key] = key === 'metrics' ? { ...settings.metrics, ...p.metrics } : p[key];
     }
     if (p.resetPosition === true) Object.assign(merged, { displayId: DEFAULT_SETTINGS.displayId, edge: DEFAULT_SETTINGS.edge, offset: DEFAULT_SETTINGS.offset });
     settings = normalizeHudSettings(merged);

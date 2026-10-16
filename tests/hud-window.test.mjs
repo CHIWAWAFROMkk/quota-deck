@@ -208,3 +208,16 @@ test('the stats button reaches the main process', async () => {
   assert.equal(opened, 1);
   hud.destroy();
 });
+
+test('an invalid value in a settings patch is ignored and the current value kept', async () => {
+  const { fake, hud, event, file } = await setup();
+  try {
+    await fake.ipc.handle['hud:settings'](event, { size: 30 });
+    const result = await fake.ipc.handle['hud:settings'](event, { size: 'abc', ringWidth: 9, showsNumbers: false });
+    assert.deepEqual([result.size, result.ringWidth, result.showsNumbers], [30, 1.5, false]);
+    const saved = JSON.parse(await readFile(file, 'utf8'));
+    assert.deepEqual([saved.size, saved.ringWidth, saved.showsNumbers], [30, 1.5, false]);
+  } finally {
+    hud.destroy();
+  }
+});

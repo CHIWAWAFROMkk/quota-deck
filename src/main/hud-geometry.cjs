@@ -29,6 +29,15 @@ function normalizeHudSettings(raw) {
   };
 }
 
+/** Whether a single display setting from the page is acceptable; same rules as normalizeHudSettings. */
+function isValidSetting(key, value) {
+  if (key === 'size') return Number.isInteger(value) && value >= 16 && value <= 40;
+  if (key === 'ringWidth') return Number.isFinite(value) && value >= 1 && value <= 4;
+  if (key === 'showsRings' || key === 'showsNumbers') return typeof value === 'boolean';
+  if (key === 'metrics') return isPlainObject(value);
+  return false;
+}
+
 /** Strip sizes the renderer measured for both orientations, or null when either is unusable. */
 function normalizeStrips(raw) {
   const one = s => (isPlainObject(s) && [s.width, s.height].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 8 && v <= 1200)
@@ -99,4 +108,4 @@ function pickDisplay(displays, primary, displayId) {
   return displays.find(display => display.id === displayId) || primary;
 }
 
-module.exports = { DEFAULT_SETTINGS, DEFAULT_STRIPS, EDGES, MARGIN, WINDOW, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge };
+module.exports = { DEFAULT_SETTINGS, DEFAULT_STRIPS, EDGES, MARGIN, WINDOW, isValidSetting, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge };
