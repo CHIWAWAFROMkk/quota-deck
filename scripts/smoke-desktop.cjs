@@ -31,6 +31,14 @@ claudeTokens.models.forEach((model, m) => { model.total = stacks.reduce((sum, co
 claudeTokens.total = claudeTokens.buckets.reduce((a, b) => a + b, 0);
 const tokenFixture = { claude: claudeTokens, codex: { status: 'unsupported', startAt: tokenStart, partial: false, total: 0, buckets: new Array(96).fill(0), models: [], stacks: Array.from({ length: 96 }, () => []) } };
 tokenModule.createTokenLedger = () => ({ read: async () => tokenFixture });
+// Never read the real ~/.claude or ~/.codex logs in the smoke run; sessions are pushed by the checks below.
+const sessionWatcherModule = require(path.join(root, 'src/main/session-watcher.cjs'));
+let sessionFeed = null;
+sessionWatcherModule.createSessionWatcher = ({ tracker, onChange }) => {
+  // The real tracker, fed by hand: lets the smoke drive a whole turn through the main process.
+  sessionFeed = (vendor, events) => { for (const event of events) tracker.ingest(vendor, event); onChange(tracker.snapshot(Date.now())); };
+  return { start: async () => {}, stop() {}, tick: async () => {}, rescan: async () => {} };
+};
 const { shell } = require('electron');
 const opened = [];
 shell.openPath = async target => { opened.push(target); return ''; };
@@ -260,6 +268,24 @@ app.whenReady().then(async () => {
   assert.equal(dismissed.at(-1).some(id => id.includes(':wait:')), false, 'waiting alerts are never dismissed');
   pushSessions(snapshotOf('idle', 'idle'));
   checks.push('alert card: newest first, Waiting on top, dismiss on close / x, usage view, legacy-safe');
+  assert.ok(sessionFeed, 'main.cjs created the session watcher');
+  const live = '7a1d9c3e-5b2f-4e8a-9c0d-112233445566';
+  const t0 = Date.now();
+  sessionFeed('claude', [
+    { kind: 'meta', at: t0, sessionId: live, source: 'claude-vscode', cwd: 'C:/work' },
+    { kind: 'title', at: t0, sessionId: live, title: 'Ship the reply card', custom: false },
+    { kind: 'prompt', at: t0, sessionId: live, text: 'Ship the reply card' },
+  ]);
+  await until(() => hudEval('!!document.querySelector("#strip [data-id=claude] .bot.working")'));
+  const ended = Date.now();
+  sessionFeed('claude', [{ kind: 'turn-end', at: ended, sessionId: live, text: 'Done: the reply card ships.', error: false, durationMs: null, model: 'claude-opus-5-5' }]);
+  await until(() => hudEval(`${alertPill('claude')}?.textContent.includes("New reply") && !!document.querySelector("#strip [data-id=claude] .bot.done")`));
+  assert.ok(Date.now() - ended < 3000, 'the reminder shows within 3 seconds');
+  await click('claude');
+  await until(() => hudEval(`${blocks}.length === 1 && ${blocks}[0].textContent.includes('Ship the reply card') && ${blocks}[0].textContent.includes('Opus 5.5')`));
+  await closeCard();
+  await until(() => hudEval(`${alertPill('claude')}?.hidden && !document.querySelector("#strip .bot")`));
+  checks.push('end to end: a finished turn reaches the HUD within 3 s and closing the card clears it through the main process');
   // <<turn-done checks>>
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
