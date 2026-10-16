@@ -84,7 +84,8 @@ function createCodexFileParser() {
       if (p.type === 'task_started') return start('started', '');
       if (p.type === 'task_complete') {
         prompt = null;
-        return [event('turn-end', { text: text(p.last_agent_message), error: Boolean(p.error), durationMs: Number.isFinite(p.duration_ms) && p.duration_ms >= 0 ? p.duration_ms : null, model })];
+        const reply = text(p.last_agent_message) || text(object(p.error) ? p.error.message : p.error);
+        return [event('turn-end', { text: reply, error: Boolean(p.error), durationMs: Number.isFinite(p.duration_ms) && p.duration_ms >= 0 ? p.duration_ms : null, model })];
       }
       if (p.type === 'turn_aborted') { prompt = null; return [event('interrupt')]; }
     }
