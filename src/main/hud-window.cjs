@@ -14,8 +14,8 @@ const TOP_LEVEL = 'normal';
 const POLL_MS = 40;
 const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy'];
 const SETTING_KEYS = ['size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
-const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card', 'hud:strips'];
-const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats'];
+const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card', 'hud:strips', 'hud:dismiss'];
+const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats', 'hud:return'];
 
 function loadSettings(file) {
   try { return normalizeHudSettings(JSON.parse(fs.readFileSync(file, 'utf8'))); }
@@ -35,7 +35,8 @@ function saveSettings(file, settings) {
 const displaySettings = s => ({ size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers, metrics: { ...s.metrics } });
 
 // `electron` is injectable so tests can drive the window logic with fakes.
-function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 'ignored' }), onOpenStats = () => {}, electron = require('electron') }) {
+function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 'ignored' }), onOpenStats = () => {},
+  onDismiss = () => {}, onReturn = async () => ({ status: 'unavailable' }), electron = require('electron') }) {
   const { BrowserWindow, ipcMain, screen } = electron;
   let settings = loadSettings(settingsPath);
   let win = null;
@@ -43,6 +44,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   let strips = DEFAULT_STRIPS;
   let items = [];
   let tokens = null;
+  let sessions = { vendors: { claude: { phase: 'idle', running: 0 }, codex: { phase: 'idle', running: 0 } }, alerts: [] };
   let drag = null;
   let ignoring = null;
   let recoveries = [];
@@ -170,6 +172,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
       send('hud:state', items);
       send('hud:settings', displaySettings(settings));
       if (tokens) send('hud:tokens', tokens);
+      send('hud:sessions', sessions);
       if (settings.visible) reveal();
     });
     win.webContents.on('render-process-gone', (_event, details) => {
@@ -202,7 +205,20 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     strips = next;
     place();
   });
-  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, layout: layoutMessage(), settings: displaySettings(settings) })));
+  ipcMain.on('hud:dismiss', (event, raw) => {
+    if (!trusted(event) || !Array.isArray(raw)) return;
+    const ids = [];
+    for (const id of raw) {
+      if (typeof id === 'string' && id.length <= 200) ids.push(id);
+      if (ids.length === 50) break;
+    }
+    onDismiss(ids);
+  });
+  ipcMain.handle('hud:return', guard(id => {
+    if (typeof id !== 'string' || id.length > 200) return { status: 'unavailable' };
+    return onReturn(id);
+  }));
+  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, sessions, layout: layoutMessage(), settings: displaySettings(settings) })));
   ipcMain.handle('hud:refresh', guard(async () => { await onRefresh(); return true; }));
   ipcMain.handle('hud:action', guard(name => {
     if (typeof name !== 'string' || !ACTIONS.includes(name)) throw new Error('未知操作');
@@ -232,6 +248,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     },
     pushState(next) { items = Array.isArray(next) ? next : []; send('hud:state', items); },
     pushTokens(next) { tokens = next; send('hud:tokens', tokens); },
+    pushSessions(next) { sessions = next; send('hud:sessions', sessions); },
     reload() {
       recoveries = [];
       if (!alive()) { create(); return; }

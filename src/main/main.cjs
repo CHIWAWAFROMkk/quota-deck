@@ -8,6 +8,9 @@ const { buildHudItems, buildHudTokens } = require('./hud-view.cjs');
 const { createHud } = require('./hud-window.cjs');
 const { createTokenLedger } = require('./token-ledger.cjs');
 const { createStats } = require('./stats-window.cjs');
+const { createSessionTracker } = require('./session-tracker.cjs');
+const { createSessionWatcher } = require('./session-watcher.cjs');
+const { returnUrl } = require('./session-links.cjs');
 
 let tray = null;
 let refreshTimer = null;
@@ -16,6 +19,8 @@ let hud = null;
 let tokenLedger = null;
 let stats = null;
 let lastTokens = null;
+let sessionTracker = null;
+let sessionWatcher = null;
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) app.quit();
@@ -90,6 +95,9 @@ function createTray() {
 
 app.whenReady().then(() => {
   if (!singleInstanceLock) return;
+  sessionTracker = createSessionTracker({ startedAt: Date.now() });
+  const pushSessions = () => hud?.pushSessions(sessionTracker.snapshot(Date.now()));
+  const dismissSessions = ids => { sessionTracker.dismiss(ids); pushSessions(); };
   configureHistory(path.join(app.getPath('userData'), 'quota-history.json'));
   tokenLedger = createTokenLedger();
   stats = createStats({ getTokens: () => lastTokens });
@@ -98,7 +106,19 @@ app.whenReady().then(() => {
     onRefresh: () => refreshAll(),
     onAction: name => actions[name](),
     onOpenStats: () => stats.open(),
+    onDismiss: dismissSessions,
+    onReturn: async id => {
+      const alert = sessionTracker.snapshot(Date.now()).alerts.find(item => item.id === id);
+      const url = returnUrl(alert);
+      if (!url) return { status: 'unavailable' };
+      try { await shell.openExternal(url); }
+      catch { return { status: 'unavailable' }; }
+      dismissSessions([id]);
+      return { status: 'opened' };
+    },
   });
+  sessionWatcher = createSessionWatcher({ tracker: sessionTracker, onChange: snapshot => hud?.pushSessions(snapshot) });
+  sessionWatcher.start().catch(() => {});
   createTray();
   refreshAll().catch(() => {});
   refreshTimer = setInterval(() => { refreshAll().catch(() => {}); }, 60_000);
@@ -107,6 +127,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   app.isQuiting = true;
   if (refreshTimer) clearInterval(refreshTimer);
+  sessionWatcher?.stop();
   hud?.destroy();
   stats?.destroy();
 });
