@@ -9,7 +9,7 @@ function createSessionWatcher({ tracker, onChange,
   claudeRoot = path.join(os.homedir(), '.claude', 'projects'),
   codexRoot = path.join(os.homedir(), '.codex', 'sessions'),
   fileSystem = fs, clock = Date.now, pollMs = 1500, scanMs = 60000,
-  activeWindowMs = 1800000, tailBytes = 262144,
+  activeWindowMs = 1800000, tailBytes = 262144, headBytes = 65536,
 }) {
   const files = new Map();
   let lastSnapshot = null;
@@ -62,15 +62,35 @@ function createSessionWatcher({ tracker, onChange,
     while (position < size) {
       const chunk = Buffer.alloc(Math.min(CHUNK, size - position));
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, position);
-      if (!bytesRead) return;
+      if (!bytesRead) return 0;
       position += bytesRead;
       const data = Buffer.concat([carry, chunk.subarray(0, bytesRead)]);
       const end = data.indexOf(10);
       if (end >= 0) {
         for (const event of parse(data.toString('utf8', 0, end))) if (event.kind === 'meta') tracker.ingest('codex', event);
-        return;
+        return position - data.length + end + 1;
       }
       carry = data;
+    }
+    return 0;
+  }
+
+  async function readUntil(handle, state, limit) {
+    while (state.offset < limit) {
+      const chunk = Buffer.alloc(Math.min(CHUNK, limit - state.offset));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, state.offset);
+      if (!bytesRead) break;
+      // Keep bytes until the newline, so a UTF-8 character split over polls
+      // or between the head and tail is decoded only after the record arrives.
+      const data = Buffer.concat([state.carry, chunk.subarray(0, bytesRead)]);
+      let from = 0;
+      for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, from)) {
+        if (state.discard) state.discard = false;
+        else for (const event of state.parse(data.toString('utf8', from, end))) tracker.ingest(state.vendor, event);
+        from = end + 1;
+      }
+      state.carry = Buffer.from(data.subarray(from));
+      state.offset += bytesRead;
     }
   }
 
@@ -83,25 +103,17 @@ function createSessionWatcher({ tracker, onChange,
       if (state.offset === null) {
         const from = Math.max(0, stat.size - tailBytes);
         const parse = state.vendor === 'claude' ? parseClaudeLine : createCodexFileParser().parse;
-        if (state.vendor === 'codex' && from > 0) await seedCodex(handle, stat.size, parse);
-        Object.assign(state, { offset: from, carry: Buffer.alloc(0), discard: from > 0, parse });
-      }
-      while (state.offset < stat.size) {
-        const chunk = Buffer.alloc(Math.min(CHUNK, stat.size - state.offset));
-        const { bytesRead } = await handle.read(chunk, 0, chunk.length, state.offset);
-        if (!bytesRead) break;
-        // Keep bytes until the newline, so a UTF-8 character split over polls
-        // is decoded once, only after its complete record has arrived.
-        const data = Buffer.concat([state.carry, chunk.subarray(0, bytesRead)]);
-        let from = 0;
-        for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, from)) {
-          if (state.discard) state.discard = false;
-          else for (const event of state.parse(data.toString('utf8', from, end))) tracker.ingest(state.vendor, event);
-          from = end + 1;
+        const offset = state.vendor === 'codex' && from > 0 ? await seedCodex(handle, stat.size, parse) : 0;
+        const initial = { ...state, offset, carry: Buffer.alloc(0), discard: false, parse };
+        if (from > 0) {
+          await readUntil(handle, initial, Math.min(headBytes, stat.size));
+          // Continue overlapping ranges without replaying records. A gap must
+          // drop the head's partial record and the tail's first fragment.
+          if (initial.offset < from) Object.assign(initial, { offset: from, carry: Buffer.alloc(0), discard: true });
         }
-        state.carry = Buffer.from(data.subarray(from));
-        state.offset += bytesRead;
+        Object.assign(state, initial);
       }
+      await readUntil(handle, state, stat.size);
     } finally { await handle.close(); }
   }
 

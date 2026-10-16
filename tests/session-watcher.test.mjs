@@ -73,6 +73,83 @@ test('codex files under year/month/day are found and parsed', async () => {
   assert.equal(s.changes.at(-1).alerts[0].model, 'GPT-6');
 });
 
+test('a long codex file still yields its title and model from the head', async () => {
+  for (const options of [{}, { headBytes: 1024 }]) {
+    const s = await setup({ tailBytes: 600, ...options });
+    const file = path.join(s.codexRoot, '2026', '10', '16', 'long.jsonl');
+    const content = x(s.now() - 10000, 'session_meta', { id: sessionId, originator: 'Codex Desktop', thread_source: 'user' }) +
+      x(s.now() - 9000, 'turn_context', { model: 'gpt-6' }) +
+      x(s.now() - 8000, 'response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'First synthetic request' }] }) +
+      x(s.now() - 7000, 'event_msg', { type: 'task_complete', last_agent_message: 'Old reply' }) +
+      x(s.now() - 1000, 'response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'x'.repeat(70000) }] }) +
+      x(s.now() + 500, 'event_msg', { type: 'task_complete', last_agent_message: 'Latest reply' });
+    assert.ok(Buffer.byteLength(content) > 65536 + 600);
+    await s.write(file, content);
+    await s.watcher.rescan();
+    await s.watcher.tick();
+    await s.watcher.tick();
+    const { alerts, vendors } = s.changes.at(-1);
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0].title, 'First synthetic request');
+    assert.equal(alerts[0].model, 'GPT-6');
+    assert.equal(alerts[0].text, 'Latest reply');
+    assert.equal(vendors.codex.running, 0);
+  }
+});
+
+test('head and tail overlap ingests each record once for both vendors', async () => {
+  for (const vendor of ['claude', 'codex']) {
+    for (const wholeFile of [false, true]) {
+      const at = Date.now();
+      const prefix = vendor === 'codex' ? x(at, 'session_meta', { id: sessionId, originator: 'Codex Desktop', thread_source: 'user' }) +
+        x(at, 'turn_context', { model: 'gpt-6' }) : '';
+      const prompt = vendor === 'codex' ? x(at, 'response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: '完成合成任务' }] }) :
+        c(at, 'user', { message: { content: '完成合成任务' } });
+      const reply = vendor === 'codex' ? x(at + 500, 'event_msg', { type: 'task_complete', last_agent_message: 'Done' }) : end(at + 500, 'Done');
+      const content = Buffer.from(prefix + prompt + '{}\n'.repeat(100) + reply);
+      const split = content.indexOf(Buffer.from('完')) + 1;
+      const s = await setup({ headBytes: wholeFile ? content.length + 100 : split, tailBytes: content.length - split + 20 });
+      const ingested = [];
+      const ingest = s.tracker.ingest;
+      s.tracker.ingest = (source, event) => { ingested.push(event); ingest(source, event); };
+      const file = vendor === 'codex' ? path.join(s.codexRoot, '2026', '10', '16', 'overlap.jsonl') : s.file;
+      await s.write(file, content);
+      await s.watcher.rescan();
+      await s.watcher.tick();
+      assert.equal(ingested.filter(e => e.kind === 'prompt').length, 1);
+      assert.equal(ingested.filter(e => e.kind === 'turn-end').length, 1);
+      assert.equal(s.changes.at(-1).alerts.length, 1);
+      assert.equal(s.changes.at(-1).alerts[0].title, '完成合成任务');
+    }
+  }
+});
+
+test('older head events enrich the title without replacing newer tracker state', async () => {
+  const s = await setup({ headBytes: 1024, tailBytes: 600 });
+  const ingest = (kind, at, fields = {}) => s.tracker.ingest('codex', { kind, at, sessionId, ...fields });
+  ingest('meta', s.now(), { source: 'codex-desktop' });
+  ingest('prompt', s.now() + 300);
+  ingest('model', s.now() + 300, { model: 'gpt-6' });
+  ingest('tool-call', s.now() + 400, { callId: 'current-tool', label: 'Current tool' });
+  await s.write(path.join(s.codexRoot, '2026', '10', '16', 'older.jsonl'),
+    x(s.now() - 10000, 'session_meta', { id: sessionId, originator: 'Codex Desktop', thread_source: 'user' }) +
+    x(s.now() + 100, 'turn_context', { model: 'older-synthetic-model' }) +
+    x(s.now() + 100, 'response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Original synthetic request' }] }) +
+    x(s.now() + 200, 'event_msg', { type: 'task_complete', last_agent_message: 'Older reply after startup' }) +
+    '{}\n'.repeat(1000));
+  await s.watcher.rescan();
+  await s.watcher.tick();
+  assert.deepEqual(s.changes.at(-1).alerts, [], 'an older turn-end after startup must not alert');
+  assert.equal(s.changes.at(-1).vendors.codex.running, 1);
+  s.advance(30400);
+  await s.watcher.tick();
+  const [waiting] = s.changes.at(-1).alerts;
+  assert.equal(waiting.kind, 'waiting');
+  assert.equal(waiting.title, 'Original synthetic request');
+  assert.equal(waiting.model, 'GPT-6', 'an older model must not replace the current model');
+  assert.equal(waiting.tool, 'Current tool', 'an older prompt must not clear current tools');
+});
+
 test('files older than the active window are ignored', async () => {
   let opens = 0;
   const s = await setup({ fileSystem: { ...fs, open: async (...args) => { opens++; return fs.open(...args); } } });
