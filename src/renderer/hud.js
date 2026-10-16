@@ -33,6 +33,7 @@
     onClick: id => card.toggle(id),
     onDragStart: () => card.close(),
     onStrips: value => window.hud.strips(value),
+    onAlertsChanged: () => scheduleHits(),
   });
 
   const card = window.HudCard.create({

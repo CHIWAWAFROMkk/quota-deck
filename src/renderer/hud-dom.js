@@ -26,6 +26,8 @@
     gear: ['stroke', [['circle', { cx: 8, cy: 8, r: 2.2 }], ['circle', { cx: 8, cy: 8, r: 4.6 }], ['path', { d: 'M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.2 1.2M11.3 11.3l1.2 1.2M3.5 12.5l1.2-1.2M11.3 4.7l1.2-1.2' }]]],
     chart: ['stroke', [['path', { d: 'M3.5 12V8.5M6.5 12V4.5M9.5 12V6.5M12.5 12V9M2 14.2h12' }]]],
     back: ['stroke', [['path', { d: 'M10 3 5 8l5 5' }]]],
+    chat: ['stroke', [['path', { d: 'M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z' }], ['path', { d: 'M5 6.5h6M5 8.8h4' }]]],
+    close: ['stroke', [['path', { d: 'M4.5 4.5l7 7M11.5 4.5l-7 7' }]]],
   };
   function icon(name) {
     const [kind, body] = ICONS[name];

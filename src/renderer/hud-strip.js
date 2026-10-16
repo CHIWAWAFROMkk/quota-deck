@@ -1,13 +1,13 @@
 (function () {
   'use strict';
-  const { el, logo } = window.HudDom;
+  const { el, icon: glyph, logo } = window.HudDom;
   const { CLICK_SLOP, HOLD_MS, isClick, metrics: metricsFor, stripSize } = window.HudMetrics;
   const SHOW_MS = 400;
   const HIDE_MS = 200;
   const FADE_MS = 400;
   const MARGIN = 4;
 
-  function create({ root, pill, frame, isBlocked, onClick, onDragStart, onStrips }) {
+  function create({ root, pill, frame, isBlocked, onClick, onDragStart, onStrips, onAlertsChanged = () => {} }) {
     let items = [];
     let settings = null;
     let sessions = null;
@@ -72,6 +72,7 @@
       if (vertical()) for (const node of root.querySelectorAll('.item')) node.style.width = '100%';
       placeFrame();
       if (pillId) showPill(pillId);
+      else renderAlerts();
     }
 
     function placeFrame() {
@@ -93,29 +94,25 @@
       root.style.top = `${layout.strip.y}px`;
       if (turned) render(); else placeFrame();
       if (pillId && !turned) showPill(pillId);
+      else renderAlerts();
     }
 
     function markRect(id) {
       return root.querySelector(`[data-id="${id}"] .mark`)?.getBoundingClientRect() || null;
     }
 
-    function showPill(id) {
-      const item = items.find(entry => entry.id === id);
+    // Beside a mark on the strip's inner side, half tucked under a vertical strip; shared by both capsules.
+    function placeBeside(node, id) {
       const mark = markRect(id);
-      if (!item || !mark || isBlocked()) { hidePill(); return; }
-      clearTimeout(fadeTimer);
-      const following = pillId !== null && !pill.hidden;
-      pillId = id;
-      pill.replaceChildren(...item.pill.map(pair => el('span', { class: `pair ${pair.level}` }, [pair.name ? el('span', { class: 'k', text: pair.name }) : null, el('span', { class: 'v', text: pair.value ?? pair.text ?? '—' })])));
+      if (!mark) return false;
       const s = { left: root.offsetLeft, top: root.offsetTop, width: root.offsetWidth, height: root.offsetHeight };
       const tuck = vertical() ? Math.round(s.width / 2) : 0;
-      pill.classList.remove('edge-left', 'edge-right', 'edge-top', 'edge-bottom');
-      pill.classList.add(`edge-${edge}`);
-      pill.classList.toggle('follow', following);
-      pill.style.setProperty('--tuck', `${tuck}px`);
-      pill.hidden = false;
-      const w = pill.offsetWidth;
-      const h = pill.offsetHeight;
+      node.classList.remove('edge-left', 'edge-right', 'edge-top', 'edge-bottom');
+      node.classList.add(`edge-${edge}`);
+      node.style.setProperty('--tuck', `${tuck}px`);
+      node.hidden = false;
+      const w = node.offsetWidth;
+      const h = node.offsetHeight;
       const cx = mark.left + mark.width / 2;
       const cy = mark.top + mark.height / 2;
       const maxX = document.documentElement.clientWidth - w - MARGIN;
@@ -127,10 +124,61 @@
       else if (edge === 'right') { x = s.left + tuck - w; y = clamp(cy - h / 2, maxY); }
       else if (edge === 'top') { y = s.top + s.height; x = clamp(cx - w / 2, maxX); }
       else { y = s.top - h; x = clamp(cx - w / 2, maxX); }
-      pill.style.left = `${Math.round(x)}px`;
-      pill.style.top = `${Math.round(y)}px`;
+      node.style.left = `${Math.round(x)}px`;
+      node.style.top = `${Math.round(y)}px`;
+      return true;
+    }
+
+    function showPill(id) {
+      const item = items.find(entry => entry.id === id);
+      if (!item || !markRect(id) || isBlocked()) { hidePill(); return; }
+      clearTimeout(fadeTimer);
+      const following = pillId !== null && !pill.hidden;
+      pillId = id;
+      pill.replaceChildren(...item.pill.map(pair => el('span', { class: `pair ${pair.level}` }, [pair.name ? el('span', { class: 'k', text: pair.name }) : null, el('span', { class: 'v', text: pair.value ?? pair.text ?? '—' })])));
+      pill.classList.toggle('follow', following);
+      placeBeside(pill, id);
+      renderAlerts();
       requestAnimationFrame(() => { if (pillId === id) pill.classList.add('shown'); });
     }
+
+    // One persistent capsule per vendor with alerts: Waiting first, then Stopped, then New reply.
+    const VENDORS = { claude: 'Claude', codex: 'Codex' };
+    const alertPills = new Map();
+    function since(at) {
+      const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+      return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
+    }
+    function alertContent(vendor, list) {
+      const waiting = list.find(a => a.kind === 'waiting');
+      const errors = list.filter(a => a.kind === 'error');
+      const replies = list.filter(a => a.kind === 'reply');
+      let tail;
+      if (waiting) tail = el('span', { class: 'alert-text waiting', text: `Waiting · ${since(Number(waiting.at) || Date.now())}` });
+      else if (errors.length) tail = el('span', { class: 'alert-text stopped', text: 'Stopped' });
+      else tail = el('span', { class: 'alert-text reply' }, [glyph('chat'), el('span', { text: replies.length > 1 ? `${replies.length} new replies` : 'New reply' })]);
+      return [logo(vendor, 'alert-logo'), el('span', { class: 'alert-name', text: VENDORS[vendor] }), tail];
+    }
+    function renderAlerts() {
+      const all = Array.isArray(sessions?.alerts) ? sessions.alerts.filter(a => a && typeof a === 'object') : [];
+      for (const vendor of Object.keys(VENDORS)) {
+        const list = all.filter(a => a.vendor === vendor);
+        let node = alertPills.get(vendor);
+        const blocked = !settings || isBlocked() || pillId !== null || !markRect(vendor);
+        if (!list.length || blocked) { if (node) { node.hidden = true; node.classList.remove('shown'); } continue; }
+        if (!node) {
+          node = el('div', { class: 'pill alert-pill hit', 'data-vendor': vendor, role: 'button', 'aria-label': `${VENDORS[vendor]} alerts` });
+          node.addEventListener('click', () => onClick(vendor));
+          document.body.append(node);
+          alertPills.set(vendor, node);
+        }
+        node.replaceChildren(...alertContent(vendor, list));
+        placeBeside(node, vendor);
+        node.classList.add('shown');
+      }
+      onAlertsChanged();
+    }
+    setInterval(() => { if (sessions?.alerts?.some(a => a?.kind === 'waiting')) renderAlerts(); }, 15000);
 
     function hidePill(now = false) {
       clearTimeout(showTimer);
@@ -140,6 +188,7 @@
       pill.classList.remove('shown', 'follow');
       if (now) pill.hidden = true;
       else fadeTimer = setTimeout(() => { if (!pillId) pill.hidden = true; }, FADE_MS);
+      renderAlerts();
     }
 
     root.addEventListener('mouseover', event => {
@@ -195,7 +244,8 @@
     return {
       setItems(next) { items = Array.isArray(next) ? next : []; render(); },
       setSettings(next) { if (next) { settings = next; render(); } },
-      setSessions(next) { sessions = next && typeof next === 'object' ? next : null; render(); },
+      setSessions(next) { sessions = next && typeof next === 'object' ? next : null; render(); renderAlerts(); },
+      renderAlerts,
       place,
       hidePill,
       markRect,
