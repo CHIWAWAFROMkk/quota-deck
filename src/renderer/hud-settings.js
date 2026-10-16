@@ -6,7 +6,7 @@
   const plainError = error => String(error?.message || 'Failed').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
 
   // Built once per visit; inputs change the strip live without rebuilding this page.
-  function view({ settings, items, back, onChange, onAction }) {
+  function view({ settings, getItems, back, onChange, onAction }) {
     const status = el('p', { class: 'set-status', 'aria-live': 'polite' });
     const row = (key, label, control) => el('div', { class: 'set-row', 'data-row': key }, [el('span', { text: label }), control]);
     let ringRow = null;
@@ -48,11 +48,22 @@
     ringRow = row('ringWidth', 'Ring thickness', slider('ringWidth', 1, 4, 0.5));
     ringRow.hidden = !settings.showsRings;
 
-    const claude = items.find(item => item.id === 'claude');
-    const claudeNote = claude?.setup === 'claude-disconnect' ? 'statusLine connected'
-      : claude?.state === 'live' || claude?.state === 'stale' ? 'Official usage API' : 'Not connected';
+    // The Claude row follows each state push (e.g. after Connect) without rebuilding the sliders.
+    const claudeBox = el('span', { class: 'set-actions' });
+    function renderClaude() {
+      const claude = getItems().find(item => item.id === 'claude');
+      const note = claude?.setup === 'claude-disconnect' ? 'statusLine connected'
+        : claude?.state === 'live' || claude?.state === 'stale' ? 'Official usage API' : 'Not connected';
+      claudeBox.replaceChildren(...[
+        el('span', { class: 'set-note', text: note }),
+        claude?.setup === 'claude-connect' ? action('claude-connect', 'Connect') : null,
+        claude?.setup === 'claude-disconnect' ? action('claude-disconnect', 'Disconnect') : null,
+        action('claude-help', 'Setup guide'),
+      ].filter(Boolean));
+    }
+    renderClaude();
 
-    return [
+    const nodes = [
       el('section', { class: 'sec' }, [el('header', { class: 'head' }, [backButton, el('h2', { text: 'Settings' })])]),
       el('section', { class: 'sec set' }, [
         el('h3', { text: 'Display' }),
@@ -64,17 +75,14 @@
       ]),
       el('section', { class: 'sec set' }, [
         el('h3', { text: 'Connections' }),
-        row('claude', 'Claude', el('span', { class: 'set-actions' }, [
-          el('span', { class: 'set-note', text: claudeNote }),
-          claude?.setup === 'claude-connect' ? action('claude-connect', 'Connect') : null,
-          claude?.setup === 'claude-disconnect' ? action('claude-disconnect', 'Disconnect') : null,
-          action('claude-help', 'Setup guide'),
-        ])),
+        row('claude', 'Claude', claudeBox),
         row('workbuddy', 'WorkBuddy', action('open-workbuddy', 'Sign in')),
         row('deepseek', 'DeepSeek', el('span', { class: 'set-note', text: 'Set DEEPSEEK_API_KEY to read balance' })),
         status,
       ]),
     ];
+    nodes.update = renderClaude;
+    return nodes;
   }
 
   window.HudSettings = { view };

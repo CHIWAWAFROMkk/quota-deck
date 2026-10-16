@@ -20,6 +20,8 @@
   }
 
   function render(tokens) {
+    // null: the main process has not finished its first ledger read yet.
+    if (tokens == null) { root.replaceChildren(el('p', { class: 'empty', text: 'Reading…' })); return; }
     const sources = ['claude', 'codex'].map(id => [id, tokens?.[id]]).filter(([, series]) => series?.status === 'ok' && series.total > 0);
     if (!sources.length) { root.replaceChildren(el('p', { class: 'empty', text: 'No token data in the last 24h' })); return; }
     root.replaceChildren(...sources.map(([id, series]) => el('section', { class: 'source' }, [
@@ -30,5 +32,5 @@
   }
 
   window.stats.onTokens(render);
-  window.stats.initial().then(render).catch(() => render(null));
+  window.stats.initial().then(render).catch(() => render({}));
 })();

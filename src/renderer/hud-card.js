@@ -11,6 +11,7 @@
     let openId = null;
     let view = 'detail';
     let closeTimer = null;
+    let settingsUpdate = null;
 
     const edgeNow = () => EDGES.find(edge => document.body.classList.contains(`edge-${edge}`)) || 'right';
     const tokenMeta = s => (!s ? 'Reading…' : s.status === 'unsupported' ? 'No local logs' : s.status !== 'ok' ? 'Read failed' : s.partial ? '24h · partial' : `24h · ${s.totalText ?? `${window.HudDom.fmtInt(s.total || 0)} tok`}`);
@@ -116,6 +117,7 @@
       const item = openId ? getItem(openId) : null;
       if (!item) { close(); return; }
       const content = view === 'settings' && settingsView ? settingsView({ back: () => { view = 'detail'; render(); } }) : detail(item);
+      settingsUpdate = view === 'settings' && typeof content.update === 'function' ? content.update : null;
       root.replaceChildren(el('div', { class: 'card-body' }, content));
       position(animate);
       for (const name of root.querySelectorAll('.row .name[data-short]')) if (name.scrollWidth > name.clientWidth) name.textContent = name.dataset.short;
@@ -167,7 +169,7 @@
       toggle(id) { if (openId === id) close(); else open(id); },
       isOpen: () => openId !== null,
       // The settings page keeps its inputs while values change, so it is only moved, not rebuilt.
-      refresh() { if (!openId) return; if (view === 'settings') position(false); else render(); },
+      refresh() { if (!openId) return; if (view === 'settings') { settingsUpdate?.(); position(false); } else render(); },
       reposition() { if (openId) position(false); },
     };
   }

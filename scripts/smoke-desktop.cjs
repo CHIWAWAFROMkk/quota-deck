@@ -166,6 +166,13 @@ app.whenReady().then(async () => {
   await hudEval('[...document.querySelectorAll("#card .btn")].find(b => b.textContent === "Setup guide").click()');
   await until(() => hudEval('document.querySelector("#card .set-status").textContent === "Opened"'));
   assert.ok(opened.some(target => target.endsWith('claude-setup.md')));
+  const pushed = await hudEval('hud.initial().then(s => s.items)');
+  pushed.find(item => item.id === 'claude').setup = 'claude-connect';
+  hudWindow.webContents.send('hud:state', pushed);
+  await until(() => hudEval('[...document.querySelectorAll("#card .btn")].some(b => b.textContent === "Connect") && document.querySelector("#card h2").textContent === "Settings"'));
+  pushed.find(item => item.id === 'claude').setup = null;
+  hudWindow.webContents.send('hud:state', pushed);
+  await until(() => hudEval('![...document.querySelectorAll("#card .btn")].some(b => b.textContent === "Connect")'));
   await hudEval('document.querySelector("#card [data-act=back]").click()');
   await until(() => hudEval('document.querySelector("#card h2")?.textContent === "Claude"'));
   await click('claude');
@@ -181,6 +188,10 @@ app.whenReady().then(async () => {
   assert.equal(statsWindow.webContents.getLastWebPreferences().sandbox, true);
   assert.deepEqual(await statsEval('[...document.querySelectorAll(".models tbody td:first-child")].map(td => td.textContent)'), ['Opus 5.5', 'Fable 5.1']);
   assert.equal(await statsEval('document.querySelectorAll(".axis span").length'), 5);
+  statsWindow.webContents.send('stats:tokens', null);
+  await until(() => statsEval('document.querySelector(".empty")?.textContent === "Reading…"'));
+  statsWindow.webContents.send('stats:tokens', await hudEval('hud.initial().then(s => s.tokens)'));
+  await until(() => statsEval('document.querySelectorAll(".source").length === 1'));
   await until(() => statsEval('document.querySelectorAll(".chart .col rect").length > 0'));
   fs.writeFileSync(path.join(output, 'stats.png'), (await statsWindow.webContents.capturePage()).toPNG());
   statsWindow.close();

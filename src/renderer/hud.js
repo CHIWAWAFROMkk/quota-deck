@@ -45,7 +45,7 @@
     },
     settingsView: ({ back }) => window.HudSettings.view({
       settings,
-      items,
+      getItems: () => items,
       back,
       onChange: patch => window.hud.setSettings(patch).catch(() => {}),
       onAction: name => window.hud.action(name),
