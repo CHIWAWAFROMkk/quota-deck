@@ -181,6 +181,20 @@ app.whenReady().then(async () => {
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").hidden'));
   checks.push('card: clickable while opening, keeps a hovered tooltip across pushes, tolerates legacy balance and ledger');
+
+  // Session events (sub-project 2a): the main process pushes SessionsSnapshot objects.
+  const snapshotOf = (claude, codex, alerts = []) => ({ vendors: { claude: { phase: claude, running: claude === 'idle' ? 0 : 1 }, codex: { phase: codex, running: codex === 'idle' ? 0 : 1 } }, alerts });
+  const pushSessions = value => hudWindow.webContents.send('hud:sessions', value);
+  pushSessions(snapshotOf('working', 'idle'));
+  await until(() => hudEval('!!document.querySelector("#strip [data-id=claude] .bot.working") && !document.querySelector("#strip [data-id=claude] img.logo") && !!document.querySelector("#strip [data-id=codex] img.logo")'));
+  pushSessions(snapshotOf('asking', 'done'));
+  await until(() => hudEval('!!document.querySelector("#strip [data-id=claude] .bot.asking") && !!document.querySelector("#strip [data-id=codex] .bot.done")'));
+  await sleep(300);
+  await shot('hud-bots');
+  pushSessions(snapshotOf('idle', 'idle'));
+  await until(() => hudEval('!!document.querySelector("#strip [data-id=claude] img.logo") && !document.querySelector("#strip .bot")'));
+  checks.push('bot faces follow each vendor session phase');
+  // <<turn-done checks>>
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
   await hudEval('document.querySelector("#card [data-act=settings]").click()');

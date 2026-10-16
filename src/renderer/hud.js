@@ -8,6 +8,7 @@
   let layout = null;
   let items = [];
   let tokens = null;
+  let sessions = null;
   let settings = null;
   let lastHits = '';
 
@@ -74,6 +75,7 @@
   window.hud.onTokens(next => { tokens = next; card.refresh(); });
   window.hud.onSettings(next => { settings = withDefaults(next); strip.setSettings(settings); card.refresh(); scheduleHits(); });
   window.hud.onLayout(applyLayout);
+  window.hud.onSessions(next => { sessions = next; strip.setSessions(next); card.refresh(); scheduleHits(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') card.close(); });
   window.addEventListener('blur', () => card.close());
 
@@ -84,6 +86,8 @@
     tokens = state.tokens;
     settings = withDefaults(state.settings);
     strip.setItems(items);
+    sessions = state.sessions || null;
+    strip.setSessions(sessions);
     strip.setSettings(settings);
     applyLayout(state.layout);
   }).catch(() => {});

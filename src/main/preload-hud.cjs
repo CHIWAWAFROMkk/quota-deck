@@ -22,4 +22,7 @@ contextBridge.exposeInMainWorld('hud', {
   onTokens: (callback) => subscribe('hud:tokens', callback),
   onLayout: (callback) => subscribe('hud:layout', callback),
   onSettings: (callback) => subscribe('hud:settings', callback),
+  onSessions: (callback) => subscribe('hud:sessions', callback),
+  dismiss: (ids) => ipcRenderer.send('hud:dismiss', Array.isArray(ids) ? ids.filter(id => typeof id === 'string').slice(0, 50) : []),
+  returnTo: (id) => ipcRenderer.invoke('hud:return', String(id)),
 });

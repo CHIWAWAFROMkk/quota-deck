@@ -135,4 +135,16 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .btn:disabled { opacity: 0.5; }
 .set-status { min-height: 16px; margin: 0; padding: 0 6px; font-size: 11px; color: var(--text-2); }
 
+/* Bot faces (session phase) replace the logo inside the ring. */
+.bot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); overflow: visible; pointer-events: none; }
+.bot .head { fill: var(--bot); }
+.bot .antenna { stroke: var(--bot); stroke-width: 1.4; stroke-linecap: round; }
+.bot .tip { fill: var(--bot); }
+.bot ellipse, .bot circle:not(.tip) { fill: #fff; }
+.bot .line { fill: none; stroke: #fff; stroke-width: 1.6; stroke-linecap: round; }
+.bot .eyes { animation: bot-scan 2s ease-in-out infinite; }
+.bot.asking .body { transform-box: fill-box; transform-origin: center bottom; animation: bot-knock 2.6s ease-out infinite; }
+@keyframes bot-scan { 0%, 100% { transform: translateX(-1.1px); } 50% { transform: translateX(1.1px); } }
+@keyframes bot-knock { 0%, 70%, 100% { transform: translateY(0); } 78% { transform: translateY(-2.2px); } 86% { transform: translateY(0); } 92% { transform: translateY(-1px); } }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

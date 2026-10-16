@@ -10,6 +10,7 @@
   function create({ root, pill, frame, isBlocked, onClick, onDragStart, onStrips }) {
     let items = [];
     let settings = null;
+    let sessions = null;
     let edge = 'right';
     let sizes = null;
     let pillId = null;
@@ -34,6 +35,12 @@
 
     // Number widths are measured once per render and drive both orientations' sizes,
     // which the main process needs to place the window and to snap while dragging.
+    // While a vendor has a session running, waiting or just finished, its logo becomes a bot face.
+    function icon(id, size) {
+      const phase = sessions?.vendors?.[id]?.phase;
+      return phase === 'working' || phase === 'asking' || phase === 'done' ? window.HudBots.face(id, phase, size) : logo(id, 'logo');
+    }
+
     function measure() {
       const font = metricsFor({ size: settings.size }).font;
       ctx.font = `500 ${font}px Inter`;
@@ -58,7 +65,7 @@
         const num = settings.showsNumbers ? el('span', { class: `num ${item.ring.level}`, text: item.label }) : null;
         if (num && !vertical()) num.style.width = `${sizes.widths[i]}px`;
         return el('button', { class: 'item', type: 'button', 'data-id': item.id, 'aria-label': `${item.name} ${item.label}` }, [
-          el('span', { class: 'mark' }, [settings.showsRings ? ring(item, m.mark, settings.ringWidth) : null, logo(item.id, 'logo')]),
+          el('span', { class: 'mark' }, [settings.showsRings ? ring(item, m.mark, settings.ringWidth) : null, icon(item.id, m.logo)]),
           num,
         ]);
       }));
@@ -188,6 +195,7 @@
     return {
       setItems(next) { items = Array.isArray(next) ? next : []; render(); },
       setSettings(next) { if (next) { settings = next; render(); } },
+      setSessions(next) { sessions = next && typeof next === 'object' ? next : null; render(); },
       place,
       hidePill,
       markRect,
