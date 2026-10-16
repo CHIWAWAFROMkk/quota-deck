@@ -56,6 +56,9 @@
     }),
     onOpenStats: () => { window.hud.openStats().catch(() => {}); },
     onChange: scheduleHits,
+    getAlerts: vendor => (Array.isArray(sessions?.alerts) ? sessions.alerts : []).filter(alert => alert && alert.vendor === vendor),
+    onDismiss: ids => window.hud.dismiss(ids),
+    onReturn: id => window.hud.returnTo(id),
   });
 
   new ResizeObserver(scheduleHits).observe(stripNode);

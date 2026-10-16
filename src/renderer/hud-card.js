@@ -7,7 +7,7 @@
   const MARGIN = 4;
   const CLOSE_MS = 100;
 
-  function create({ root, strip, getItem, getTokens, getMetric, setMetric, settingsView = null, onOpenStats, onChange }) {
+  function create({ root, strip, getItem, getTokens, getMetric, setMetric, settingsView = null, onOpenStats, onChange, getAlerts = () => [], onDismiss = () => {}, onReturn = async () => ({}) }) {
     let openId = null;
     let view = 'detail';
     let closeTimer = null;
@@ -15,6 +15,8 @@
     // While the pointer is on the card a data push waits, so a tooltip being read is not torn down.
     let hovering = false;
     let pendingRender = false;
+    // Reply/error alerts on screen when the card opened; closing the card marks exactly these as seen.
+    let openedAlertIds = new Set();
 
     const edgeNow = () => EDGES.find(edge => document.body.classList.contains(`edge-${edge}`)) || 'right';
     // A ledger needs its quarter-hour buckets and start time to be drawn; older ones only have a total.
@@ -124,10 +126,59 @@
       }
     }
 
+    const pad = n => String(n).padStart(2, '0');
+    const clockOf = at => { const d = new Date(at); return Number.isFinite(d.getTime()) ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : ''; };
+    function durationOf(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return '';
+      const minutes = Math.round(ms / 60000);
+      if (minutes < 1) return '<1m';
+      return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
+    }
+    const sinceOf = at => durationOf(Date.now() - at) || '<1m';
+    const alertsOf = id => (getAlerts(id) || []).filter(a => a && typeof a === 'object' && typeof a.id === 'string');
+    // Waiting first, then newest first.
+    const ordered = list => [...list].sort((a, b) => ((b.kind === 'waiting') - (a.kind === 'waiting')) || ((Number(b.at) || 0) - (Number(a.at) || 0)));
+
+    function alertBlock(alert, item) {
+      const vendor = alert.vendor || item.id;
+      const waiting = alert.kind === 'waiting';
+      const error = alert.kind === 'error';
+      const label = waiting ? 'Waiting' : error ? 'Stopped' : 'New reply';
+      const head = el('header', { class: 'alert-head' }, [
+        el('span', { class: 'head-logo' }, [window.HudBots.face(vendor, waiting ? 'asking' : 'done', 14)]),
+        el('div', { class: 'alert-who' }, [el('h2', { text: item.name }), alert.model ? el('span', { class: 'alert-model', text: String(alert.model) }) : null]),
+        el('span', { class: `alert-chip ${alert.kind}` }, [waiting ? null : icon('chat'), el('span', { text: label })]),
+        waiting ? null : el('button', { class: 'alert-x', type: 'button', 'data-act': 'dismiss', 'data-id': alert.id, 'aria-label': 'Dismiss', title: 'Dismiss' }, [icon('close')]),
+      ]);
+      const meta = waiting
+        ? `Waiting ${sinceOf(Number(alert.at) || Date.now())}`
+        : [clockOf(Number(alert.at)), durationOf(Number(alert.durationMs))].filter(Boolean).join(' · ');
+      return el('section', { class: `alert-block ${alert.kind || 'reply'}`, 'data-id': alert.id }, [
+        head,
+        el('h3', { class: 'alert-title', text: alert.title || item.name }),
+        waiting ? el('p', { class: 'alert-status', text: 'Waiting for you' }) : error ? el('p', { class: 'alert-status', text: 'Stopped with an error' }) : null,
+        waiting && alert.tool ? el('p', { class: 'alert-tool', text: String(alert.tool) }) : null,
+        !waiting && alert.text ? el('p', { class: 'alert-summary', text: String(alert.text) }) : null,
+        el('footer', { class: 'alert-foot' }, [
+          el('span', { class: 'alert-meta', text: meta }),
+          el('span', { class: 'alert-actions' }, [
+            el('button', { class: 'alert-link', type: 'button', 'data-act': 'usage', text: 'View token usage' }),
+            alert.returnable === true ? el('button', { class: 'alert-return', type: 'button', 'data-act': 'return', 'data-id': alert.id, text: 'Return to session' }) : null,
+          ]),
+        ]),
+      ]);
+    }
+
+    function alertsView(item) {
+      return ordered(alertsOf(item.id)).map(alert => alertBlock(alert, item));
+    }
+
     function render(animate = false) {
       const item = openId ? getItem(openId) : null;
       if (!item) { close(); return; }
-      const content = view === 'settings' && settingsView ? settingsView({ back: () => { view = 'detail'; render(); } }) : detail(item);
+      if (view === 'alerts' && !alertsOf(openId).length) view = 'detail';
+      const content = view === 'settings' && settingsView ? settingsView({ back: () => { view = 'detail'; render(); } })
+        : view === 'alerts' ? alertsView(item) : detail(item);
       settingsUpdate = view === 'settings' && typeof content.update === 'function' ? content.update : null;
       root.replaceChildren(el('div', { class: 'card-body' }, content));
       position(animate);
@@ -139,7 +190,9 @@
       clearTimeout(closeTimer);
       const animate = !openId;
       openId = id;
-      view = 'detail';
+      const alerts = alertsOf(id);
+      view = alerts.length ? 'alerts' : 'detail';
+      openedAlertIds = new Set(alerts.filter(a => a.kind === 'reply' || a.kind === 'error').map(a => a.id));
       pendingRender = false;
       root.hidden = false;
       root.classList.remove('closing');
@@ -149,6 +202,8 @@
 
     function close() {
       if (!openId) return;
+      if (openedAlertIds.size) onDismiss([...openedAlertIds]);
+      openedAlertIds = new Set();
       openId = null;
       view = 'detail';
       root.classList.remove('shown');
@@ -171,12 +226,25 @@
       const act = event.target.closest('[data-act]')?.dataset.act;
       if (act === 'settings' && settingsView) { view = 'settings'; render(); }
       if (act === 'stats') onOpenStats();
+      const target = event.target.closest('[data-act]');
+      if (act === 'usage') { view = 'detail'; render(); }
+      if (act === 'dismiss' && target?.dataset.id) {
+        openedAlertIds.delete(target.dataset.id);
+        onDismiss([target.dataset.id]);
+        target.closest('.alert-block')?.remove();
+        if (!root.querySelector('.alert-block')) close(); else { position(false); onChange(); }
+      }
+      if (act === 'return' && target?.dataset.id) {
+        const id = target.dataset.id;
+        openedAlertIds.delete(id);
+        Promise.resolve(onReturn(id)).then(result => { if (result?.status === 'opened') close(); }, () => {});
+      }
     });
     root.addEventListener('transitionend', onChange);
     root.addEventListener('mouseover', () => { hovering = true; });
     root.addEventListener('mouseleave', () => {
       hovering = false;
-      if (pendingRender && openId && view === 'detail') render();
+      if (pendingRender && openId && (view === 'detail' || view === 'alerts')) render();
       pendingRender = false;
     });
     new ResizeObserver(onChange).observe(root);

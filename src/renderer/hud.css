@@ -135,6 +135,34 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .btn:disabled { opacity: 0.5; }
 .set-status { min-height: 16px; margin: 0; padding: 0 6px; font-size: 11px; color: var(--text-2); }
 
+/* Alert view of the card (video 16-17s): one block per alert. */
+.alert-block { display: flex; flex-direction: column; gap: 6px; }
+.alert-block + .alert-block { padding-top: 10px; border-top: 1px solid var(--divider); }
+.alert-head { display: flex; align-items: center; gap: 8px; }
+.alert-head .bot { position: static; transform: none; width: 18px; height: 18px; }
+.alert-who { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.alert-who h2 { margin: 0; font-size: 13px; font-weight: 700; }
+.alert-model { font-size: 11px; color: var(--text-2); }
+.alert-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #64a8ff; }
+.alert-chip .icon-svg { width: 14px; height: 14px; }
+.alert-chip.waiting { color: var(--warn); }
+.alert-chip.error { color: var(--high); }
+.alert-x { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--text-2); }
+.alert-x:hover { background: rgba(245, 245, 247, 0.08); }
+.alert-x .icon-svg { width: 11px; height: 11px; }
+.alert-title { margin: 4px 0 0; font-size: 14px; font-weight: 600; }
+.alert-status { margin: 0; font-size: 12px; color: var(--warn); }
+.alert-block.error .alert-status { color: var(--high); }
+.alert-tool { margin: 0; font-size: 12px; color: var(--text-2); font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alert-summary { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.alert-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+.alert-meta { font-size: 11px; color: var(--text-3); }
+.alert-actions { display: flex; align-items: center; gap: 10px; }
+.alert-link { font-size: 11px; color: var(--text-2); }
+.alert-link:hover { color: var(--text); }
+.alert-return { padding: 4px 10px; border-radius: 6px; background: #2f6fe0; color: #fff; font-size: 12px; font-weight: 500; }
+.alert-return:hover { background: #3a7cf0; }
+
 /* Persistent alert capsules: clickable, same shape as the hover capsule. */
 .alert-pill { pointer-events: auto; cursor: default; gap: 6px; font-size: 13px; }
 .alert-pill .alert-logo { width: 14px; height: 14px; }
