@@ -134,7 +134,8 @@
       if (minutes < 1) return '<1m';
       return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
     }
-    const sinceOf = at => durationOf(Date.now() - at) || '<1m';
+    // Elapsed waiting time rounds down, like the capsule (90 s reads 1m).
+    const sinceOf = at => durationOf(Math.floor(Math.max(0, Date.now() - at) / 60000) * 60000) || '<1m';
     const alertsOf = id => (getAlerts(id) || []).filter(a => a && typeof a === 'object' && typeof a.id === 'string');
     // Waiting first, then newest first.
     const ordered = list => [...list].sort((a, b) => ((b.kind === 'waiting') - (a.kind === 'waiting')) || ((Number(b.at) || 0) - (Number(a.at) || 0)));
@@ -186,6 +187,8 @@
 
     function open(id) {
       clearTimeout(closeTimer);
+      // Switching straight to another vendor counts as having seen what this card showed.
+      if (openId && openId !== id && openedAlertIds.size) onDismiss([...openedAlertIds]);
       const animate = !openId;
       openId = id;
       const alerts = alertsOf(id);

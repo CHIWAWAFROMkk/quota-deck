@@ -147,7 +147,7 @@
     const alertPills = new Map();
     function since(at) {
       const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
-      return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
+      return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
     }
     function alertContent(vendor, list) {
       const waiting = list.find(a => a.kind === 'waiting');

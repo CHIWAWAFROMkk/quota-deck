@@ -34,7 +34,7 @@ test('claude prompt, tool call, tool result and end of turn', () => {
   ]);
   for (const stop_reason of ['end_turn', 'stop_sequence']) {
     assert.deepEqual(parseC({ type: 'assistant', message: { stop_reason, model: 'claude-opus-4-1', content: [{ type: 'text', text: 'Done' }, { type: 'thinking', thinking: 'hidden' }, { type: 'text', text: ' now' }] } }), [
-      { kind: 'turn-end', at, sessionId, text: 'Done now', error: false, durationMs: null, model: 'claude-opus-4-1' },
+      { kind: 'turn-end', at, sessionId, text: 'Done now', error: false, durationMs: null, model: 'claude-opus-4-1', messageId: null },
     ]);
   }
   assert.deepEqual(parseC({ type: 'user', message: { content: '[Request interrupted by user]' } }), [{ kind: 'interrupt', at, sessionId }]);
@@ -52,7 +52,7 @@ test('claude sidechain, meta and command lines are ignored', () => {
 
 test('claude api error ends the turn with error', () => {
   assert.deepEqual(parseC({ type: 'assistant', isApiErrorMessage: true, message: { content: [{ type: 'text', text: 'Synthetic error' }] } }), [
-    { kind: 'turn-end', at, sessionId, text: 'Synthetic error', error: true, durationMs: null, model: null },
+    { kind: 'turn-end', at, sessionId, text: 'Synthetic error', error: true, durationMs: null, model: null, messageId: null },
   ]);
 });
 
@@ -149,4 +149,29 @@ test('long texts are capped', () => {
   const parser = codexParser();
   assert.equal(parser.parse(codex('event_msg', { type: 'task_complete', last_agent_message: long }))[0].text.length, 2048);
   assert.equal(parser.parse(codex('response_item', { type: 'function_call', call_id: 'a', name: 'exec', arguments: JSON.stringify({ cmd: long }) }))[0].label.length, 80);
+});
+
+test('claude thinking and text lines of one message carry the same message id', () => {
+  const thinking = parseC({ type: 'assistant', message: { id: 'msg_1', stop_reason: 'end_turn', content: [{ type: 'thinking', thinking: 'hmm' }] } });
+  const reply = parseC({ type: 'assistant', message: { id: 'msg_1', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done' }] } });
+  assert.equal(thinking[0].kind, 'turn-end');
+  assert.equal(thinking[0].messageId, 'msg_1');
+  assert.equal(reply[0].messageId, 'msg_1');
+  assert.equal(reply[0].text, 'Done');
+});
+
+test('claude task notifications, reminders and compact summaries are not prompts', () => {
+  assert.deepEqual(parseC({ type: 'user', message: { content: '<task-notification>\n<task-id>x</task-id>' } }), []);
+  assert.deepEqual(parseC({ type: 'user', message: { content: [{ type: 'text', text: '<system-reminder>note</system-reminder>' }] } }), []);
+  assert.deepEqual(parseC({ type: 'user', isCompactSummary: true, message: { content: 'This session is being continued from a previous conversation.' } }), []);
+  assert.equal(parseC({ type: 'user', message: { content: 'A real prompt' } })[0].kind, 'prompt');
+});
+
+test('subagent calls are not tool calls that could look like waiting', () => {
+  const events = parseC({ type: 'assistant', message: { stop_reason: 'tool_use', content: [
+    { type: 'tool_use', id: 'a', name: 'Task', input: { description: 'review' } },
+    { type: 'tool_use', id: 'b', name: 'Agent', input: { description: 'review' } },
+    { type: 'tool_use', id: 'c', name: 'Bash', input: { command: 'ls' } },
+  ] } });
+  assert.deepEqual(events.map(e => e.callId), ['c']);
 });

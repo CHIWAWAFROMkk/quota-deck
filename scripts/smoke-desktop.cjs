@@ -269,6 +269,18 @@ app.whenReady().then(async () => {
   assert.equal(dismissed.at(-1).some(id => id.includes(':wait:')), false, 'waiting alerts are never dismissed');
   pushSessions(snapshotOf('idle', 'idle'));
   checks.push('alert card: newest first, Waiting on top, dismiss on close / x, usage view, legacy-safe');
+  pushSessions(snapshotOf('done', 'done', [alertOf(1), alertOf(2, { id: 'codex:switch:2', vendor: 'codex', sessionId: '11111111-2222-3333-4444-555555555555' })]));
+  await click('claude');
+  await until(() => hudEval(`${blocks}.length === 1`));
+  const beforeSwitch = dismissed.length;
+  await click('codex');
+  await until(() => dismissed.length > beforeSwitch);
+  assert.deepEqual(dismissed.at(-1), [alertOf(1).id], 'switching to another vendor marks the shown alerts as seen');
+  await closeCard();
+  pushSessions(snapshotOf('asking', 'idle', [alertOf(3, { id: `claude:${sid(3)}:wait:c9`, kind: 'waiting', tool: 'Bash: npm test', at: Date.now() - 90000 })]));
+  await until(() => hudEval(`${alertPill('claude')}?.textContent.includes("Waiting · 1m")`));
+  pushSessions(snapshotOf('idle', 'idle'));
+  checks.push('switching vendors dismisses what was shown; waiting minutes round down');
   assert.ok(sessionFeed, 'main.cjs created the session watcher');
   const live = '7a1d9c3e-5b2f-4e8a-9c0d-112233445566';
   const t0 = Date.now();

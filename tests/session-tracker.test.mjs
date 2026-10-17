@@ -183,3 +183,15 @@ test('snapshot callers cannot mutate stored replies and limits are configurable'
   snapshot.alerts[0].text = 'changed';
   assert.equal(tracker.snapshot(t + 101).alerts[0].text.length, 2048);
 });
+
+test('one message split into thinking and text lines alerts once, with the text', () => {
+  const { tracker, ingest } = setup();
+  ingest('turn-end', t + 3000, { text: '', error: false, durationMs: null, model: null, messageId: 'msg_1' });
+  ingest('turn-end', t + 3400, { text: 'Done', error: false, durationMs: null, model: null, messageId: 'msg_1' });
+  const { alerts } = tracker.snapshot(t + 4000);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].text, 'Done');
+  ingest('prompt', t + 5000, { text: 'Next' });
+  ingest('turn-end', t + 6000, { text: 'Again', error: false, durationMs: null, model: null, messageId: 'msg_2' });
+  assert.equal(tracker.snapshot(t + 7000).alerts.length, 1, 'a new message after a new prompt is a new turn');
+});

@@ -13,9 +13,12 @@ function toolLabel(name, input, keys) {
   return text(`${text(name, 80)}${detail === undefined ? '' : `: ${text(detail, 80)}`}`, 80);
 }
 
+const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
+
 function parseClaudeLine(line) {
   const row = json(line);
-  if (!row || row.isSidechain === true || row.isMeta === true) return [];
+  // Compact summaries are written as user lines but start no turn of their own.
+  if (!row || row.isSidechain === true || row.isMeta === true || row.isCompactSummary === true) return [];
   const at = timestamp(row.timestamp);
   if (typeof row.sessionId !== 'string' || !row.sessionId || !Number.isFinite(at)) return [];
   const base = { at, sessionId: row.sessionId };
@@ -27,14 +30,17 @@ function parseClaudeLine(line) {
     if (results.length) events = results.map(b => event('tool-result', { callId: b.tool_use_id }));
     else {
       const value = messageText(message.content);
-      if (!value || /^<(?:command-|local-command-)/.test(value)) return [];
+      // Text starting with a tag is injected by the client (task notifications, reminders, commands), not typed.
+      if (!value || value.startsWith('<')) return [];
       events = [value.startsWith('[Request interrupted') ? event('interrupt') : event('prompt', { text: value })];
     }
   } else if (row.type === 'assistant') {
     if (row.isApiErrorMessage === true || ['end_turn', 'stop_sequence'].includes(message.stop_reason)) {
-      events = [event('turn-end', { text: messageText(message.content), error: row.isApiErrorMessage === true, durationMs: null, model: typeof message.model === 'string' ? message.model : null })];
+      // One message can be written as several lines (thinking, then text); they share message.id.
+      events = [event('turn-end', { text: messageText(message.content), error: row.isApiErrorMessage === true, durationMs: null, model: typeof message.model === 'string' ? message.model : null, messageId: typeof message.id === 'string' ? message.id : null })];
     } else if (message.stop_reason === 'tool_use') {
-      events = blocks(message.content).filter(b => b.type === 'tool_use' && typeof b.id === 'string').map(b => event('tool-call', { callId: b.id, label: toolLabel(b.name, b.input, ['command', 'file_path', 'pattern']) }));
+      // Subagent calls (Task / Agent) run for minutes by design; they must not read as "waiting for you".
+      events = blocks(message.content).filter(b => b.type === 'tool_use' && typeof b.id === 'string' && !SUBAGENT_TOOLS.has(b.name)).map(b => event('tool-call', { callId: b.id, label: toolLabel(b.name, b.input, ['command', 'file_path', 'pattern']) }));
     }
   } else if (row.type === 'ai-title' || row.type === 'custom-title') {
     const custom = row.type === 'custom-title';

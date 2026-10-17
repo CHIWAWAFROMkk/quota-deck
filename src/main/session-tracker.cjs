@@ -55,7 +55,15 @@ function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterM
       if (!s.tools.has(event.callId)) s.tools.set(event.callId, { at, label: capped(event.label, 80) });
     } else if (kind === 'tool-result') {
       s.tools.delete(event.callId);
+    } else if (kind === 'turn-end' && event.messageId && event.messageId === s.endMessageId) {
+      // A later line of the same message (e.g. text after thinking) fills in the reply, never a second alert.
+      const alert = alerts.get(s.endAlertId);
+      if (alert && !alert.text && event.text) alert.text = capped(event.text, 2048);
+      s.endedAt = Math.max(s.endedAt, at);
+      s.transitionAt = Math.max(s.transitionAt, at);
     } else if (kind === 'interrupt' || kind === 'turn-end') {
+      s.endMessageId = kind === 'turn-end' ? event.messageId || null : null;
+      s.endAlertId = null;
       s.active = false;
       s.tools.clear();
       s.transitionAt = at;
@@ -63,6 +71,7 @@ function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterM
       s.endedAt = Math.max(s.endedAt, at);
       if (kind === 'interrupt' || duplicate || at < startedAt || !notifiable(s)) return;
       const id = `${key}:${at}`;
+      s.endAlertId = id;
       const durationMs = Number.isFinite(event.durationMs) && event.durationMs >= 0 ? event.durationMs
         : s.promptAt === null ? null : Math.max(0, at - s.promptAt);
       alerts.set(id, {
