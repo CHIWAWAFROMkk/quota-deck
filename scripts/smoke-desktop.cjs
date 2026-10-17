@@ -372,6 +372,15 @@ app.whenReady().then(async () => {
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").hidden'));
   checks.push('card height is capped to the room on the inner side of a top-docked strip');
+  pushSessions(snapshotOf('done', 'done', [alertOf(1), alertOf(2, { id: 'codex:x:2', vendor: 'codex', sessionId: '11111111-2222-3333-4444-555555555555' })]));
+  await until(() => hudEval('[...document.querySelectorAll(".alert-pill")].filter(p => !p.hidden).length === 2'));
+  await sleep(450);
+  const overlap = await hudEval(`(() => { const [a, b] = [...document.querySelectorAll('.alert-pill')].filter(p => !p.hidden).map(p => p.getBoundingClientRect());
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom; })()`);
+  assert.equal(overlap, false, 'alert capsules of two vendors never overlap at the top edge');
+  await shot('hud-top-alerts');
+  pushSessions(snapshotOf('idle', 'idle'));
+  checks.push('two vendors alerting at the top edge get separate, non-overlapping capsules');
   const dragging = async () => (await hudEval('hud.initial().then(s => s.layout)')).dragging;
   const pressAndMove = () => hudEval(`(() => { const s = document.querySelector('#strip');
     s.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, screenX: 10, screenY: 10, pointerId: 1 }));

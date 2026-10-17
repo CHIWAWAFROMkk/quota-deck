@@ -161,6 +161,7 @@
     }
     function renderAlerts() {
       const all = Array.isArray(sessions?.alerts) ? sessions.alerts.filter(a => a && typeof a === 'object') : [];
+      const placed = [];
       for (const vendor of Object.keys(VENDORS)) {
         const list = all.filter(a => a.vendor === vendor);
         let node = alertPills.get(vendor);
@@ -174,6 +175,17 @@
         }
         node.replaceChildren(...alertContent(vendor, list));
         placeBeside(node, vendor);
+        // Docked top or bottom, neighbouring marks are close, so a capsule that would cover an
+        // earlier one steps one row further away from the strip.
+        const box = () => ({ x: node.offsetLeft, y: node.offsetTop, w: node.offsetWidth, h: node.offsetHeight });
+        const hits = r => placed.some(o => r.x < o.x + o.w && o.x < r.x + r.w && r.y < o.y + o.h && o.y < r.y + r.h);
+        if (!vertical()) {
+          for (let step = 0; step < 4 && hits(box()); step++) {
+            const r = box();
+            node.style.top = `${r.y + (edge === 'top' ? r.h + 4 : -(r.h + 4))}px`;
+          }
+        }
+        placed.push(box());
         node.classList.add('shown');
       }
       onAlertsChanged();
