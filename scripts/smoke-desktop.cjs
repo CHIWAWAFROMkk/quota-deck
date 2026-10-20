@@ -322,10 +322,10 @@ app.whenReady().then(async () => {
   const pushed = await hudEval('hud.initial().then(s => s.items)');
   pushed.find(item => item.id === 'claude').setup = 'claude-connect';
   hudWindow.webContents.send('hud:state', pushed);
-  await until(() => hudEval('[...document.querySelectorAll("#card .btn")].some(b => b.textContent === "Connect") && document.querySelector("#card h2").textContent === "Settings"'));
+  await until(() => hudEval('[...document.querySelectorAll("#card [data-row=claude] .btn")].some(b => b.textContent === "Connect") && document.querySelector("#card h2").textContent === "Settings"'));
   pushed.find(item => item.id === 'claude').setup = null;
   hudWindow.webContents.send('hud:state', pushed);
-  await until(() => hudEval('![...document.querySelectorAll("#card .btn")].some(b => b.textContent === "Connect")'));
+  await until(() => hudEval('![...document.querySelectorAll("#card [data-row=claude] .btn")].some(b => b.textContent === "Connect")'));
   await hudEval('document.querySelector("#card [data-act=back]").click()');
   await until(() => hudEval('document.querySelector("#card h2")?.textContent === "Claude"'));
   await click('claude');
