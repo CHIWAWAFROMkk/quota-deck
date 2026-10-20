@@ -300,6 +300,22 @@ app.whenReady().then(async () => {
   await until(() => hudEval(`${alertPill('claude')}?.hidden && !document.querySelector("#strip .bot")`));
   checks.push('end to end: a finished turn reaches the HUD within 3 s and closing the card clears it through the main process');
   // <<turn-done checks>>
+  // <<approval checks>> An approval request: capsule, card with Deny / Allow once, ahead of Waiting.
+  pushSessions(snapshotOf('asking', 'idle', [
+    alertOf(3, { id: `claude:${sid(3)}:wait:c1`, kind: 'waiting', tool: 'Bash: npm run build', at: Date.now() - 125000 }),
+    { id: 'approval:req-1', vendor: 'claude', kind: 'approval', sessionId: sid(3), title: 'QuotaDeck', model: null,
+      text: 'git push origin feat/hud-approval', tool: 'Bash', at: Date.now() - 42000, durationMs: null, returnable: false },
+  ]));
+  await until(() => hudEval(`${alertPill('claude')}?.textContent.includes('Approve?')`));
+  await click('claude');
+  await until(() => hudEval(`${blocks}.length === 2`));
+  assert.equal(await hudEval(`${blocks}[0].dataset.id === 'approval:req-1' && ${blocks}[0].querySelector('[data-act=approve-allow]')?.textContent === 'Allow once' && ${blocks}[0].querySelector('[data-act=approve-deny]')?.textContent === 'Deny' && !${blocks}[0].querySelector('[data-act=dismiss]')`), true);
+  assert.equal(await hudEval(`${blocks}[0].textContent.includes('git push origin feat/hud-approval')`), true);
+  await sleep(450);
+  await shot('hud-approval');
+  await closeCard();
+  pushSessions(snapshotOf('idle', 'idle'));
+  checks.push('approval card: Approve? capsule, Deny / Allow once ahead of Waiting, no dismiss');
   await click('claude');
   await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
   await hudEval('document.querySelector("#card [data-act=settings]").click()');
