@@ -304,7 +304,7 @@ app.whenReady().then(async () => {
   await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
   await hudEval('document.querySelector("#card [data-act=settings]").click()');
   await until(() => hudEval('document.querySelector("#card h2")?.textContent === "Settings"'));
-  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .set-row > span:first-child")].map(n => n.textContent)'), ['Size', 'Show rings', 'Ring thickness', 'Show numbers', 'Position', 'Claude', 'WorkBuddy', 'DeepSeek']);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .set-row > span:first-child")].map(n => n.textContent)'), ['Size', 'Show rings', 'Ring thickness', 'Show numbers', 'Position', 'Claude', 'Approvals', 'WorkBuddy', 'DeepSeek']);
   await sleep(450);
   await shot('hud-settings');
   await hudEval(`(() => { const r = document.querySelector('#card input[data-key=size]'); r.value = '30'; r.dispatchEvent(new Event('input', { bubbles: true })); })()`);

@@ -79,3 +79,15 @@ test('approvals with an unknown vendor or no id are ignored', () => {
   source.summary = 'changed after the fact';
   assert.equal(tracker.snapshot(t + 600).alerts[0].text, 'npm test');
 });
+
+test('a pending approval replaces the inferred Waiting card for the same session', () => {
+  const tracker = createSessionTracker({ startedAt: 0, waitingAfterMs: 1000 });
+  tracker.ingest('claude', { kind: 'meta', sessionId: 's1', at: 1, source: 'claude-vscode' });
+  tracker.ingest('claude', { kind: 'prompt', sessionId: 's1', at: 2, text: 'go' });
+  tracker.ingest('claude', { kind: 'tool-call', sessionId: 's1', at: 3, callId: 'c1', label: 'Bash' });
+  assert.deepEqual(tracker.snapshot(5000).alerts.map(a => a.kind), ['waiting']);
+  tracker.setApprovals([{ id: 'r1', vendor: 'claude', sessionId: 's1', cwd: 'C:/p', tool: 'Bash', summary: 'npm test', at: 4 }]);
+  assert.deepEqual(tracker.snapshot(5000).alerts.map(a => a.kind), ['approval']);
+  tracker.setApprovals([]);
+  assert.deepEqual(tracker.snapshot(5000).alerts.map(a => a.kind), ['waiting']);
+});

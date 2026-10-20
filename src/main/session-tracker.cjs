@@ -113,6 +113,8 @@ function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterM
       if (!s.active || now - s.lastActivity >= abandonAfterMs) continue;
       vendors[s.vendor].running++;
       if (!notifiable(s)) continue;
+      // The tool call behind a pending approval never returns; one card per request, not two.
+      if (approvals.some(item => item.vendor === s.vendor && item.sessionId === s.sessionId)) continue;
       let oldest = null;
       for (const [callId, call] of s.tools) if (!oldest || call.at < oldest.at) oldest = { callId, ...call };
       if (oldest && now - oldest.at >= waitingAfterMs) current.push({

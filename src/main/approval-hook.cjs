@@ -144,7 +144,9 @@ async function main({ argv = process.argv.slice(2), stdin = process.stdin, fetch
 }
 
 if (require.main === module) {
-  main().catch(() => {});
+  // Claude Code waits for this process to exit; fetch's keep-alive socket would hold it
+  // open for seconds after the decision. Exit once stdout has drained.
+  main().catch(() => {}).finally(() => { process.stdout.write('', () => process.exit(0)); });
 }
 
 module.exports = { endpointPath, summarize, buildRequest, decisionOutput, main };

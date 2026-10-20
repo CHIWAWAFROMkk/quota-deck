@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const HOOK_SCRIPT = path.join(__dirname, 'approval-hook.cjs');
 const HOOK_NAME = path.basename(HOOK_SCRIPT);
+const forward = file => String(file).replace(/\\/g, '/');
 
 function claudeSettingsPath() {
   return process.env.QUOTADECK_CLAUDE_SETTINGS || path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'settings.json');
@@ -59,7 +60,9 @@ function hasOurs(file) {
 }
 
 function hookGroup(vendor, nodePath) {
-  return { matcher: '*', hooks: [{ type: 'command', command: nodePath, args: [HOOK_SCRIPT, '--vendor', vendor], timeout: 120 }] };
+  // One command line, quoted like the statusline bridge that already runs on this machine:
+  // Codex's hooks.json is not documented to accept `args`, a single command string works for both.
+  return { matcher: '*', hooks: [{ type: 'command', command: `"${forward(nodePath)}" "${forward(HOOK_SCRIPT)}" --vendor ${vendor}`, timeout: 120 }] };
 }
 
 function connectionState({ settingsPath = claudeSettingsPath(), codexPath = codexHooksPath() } = {}) {
