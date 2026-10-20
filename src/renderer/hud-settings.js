@@ -6,7 +6,7 @@
   const plainError = error => String(error?.message || 'Failed').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
 
   // Built once per visit; inputs change the strip live without rebuilding this page.
-  function view({ settings, getItems, back, onChange, onAction }) {
+  function view({ settings, getSettings = () => settings, getItems, back, onChange, onAction }) {
     const status = el('p', { class: 'set-status', 'aria-live': 'polite' });
     const row = (key, label, control) => el('div', { class: 'set-row', 'data-row': key }, [el('span', { text: label }), control]);
     let ringRow = null;
@@ -63,6 +63,21 @@
     }
     renderClaude();
 
+    // Approval hooks can be installed for Claude and, when present, Codex. Missing state
+    // from an older main process reads as not connected instead of breaking the page.
+    const approvalBox = el('span', { class: 'set-actions' });
+    function renderApprovals() {
+      const source = getSettings()?.approvals;
+      const approvals = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+      const connected = approvals.claude === true || approvals.codex === true;
+      approvalBox.replaceChildren(...[
+        el('span', { class: 'set-note', text: connected ? 'Connected' : 'Not connected' }),
+        approvals.codexAvailable === true && approvals.codex !== true ? el('span', { class: 'set-note', text: 'Codex: run /hooks once to trust' }) : null,
+        action(connected ? 'approval-disconnect' : 'approval-connect', connected ? 'Disconnect' : 'Connect'),
+      ].filter(Boolean));
+    }
+    renderApprovals();
+
     const nodes = [
       el('section', { class: 'sec' }, [el('header', { class: 'head' }, [backButton, el('h2', { text: 'Settings' })])]),
       el('section', { class: 'sec set' }, [
@@ -76,12 +91,13 @@
       el('section', { class: 'sec set' }, [
         el('h3', { text: 'Connections' }),
         row('claude', 'Claude', claudeBox),
+        row('approvals', 'Approvals', approvalBox),
         row('workbuddy', 'WorkBuddy', action('open-workbuddy', 'Sign in')),
         row('deepseek', 'DeepSeek', el('span', { class: 'set-note', text: 'Set DEEPSEEK_API_KEY to read balance' })),
         status,
       ]),
     ];
-    nodes.update = renderClaude;
+    nodes.update = () => { renderClaude(); renderApprovals(); };
     return nodes;
   }
 

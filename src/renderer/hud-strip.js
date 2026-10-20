@@ -142,7 +142,7 @@
       requestAnimationFrame(() => { if (pillId === id) pill.classList.add('shown'); });
     }
 
-    // One persistent capsule per vendor with alerts: Waiting first, then Stopped, then New reply.
+    // One persistent capsule per vendor with alerts: Approval first, then Waiting, then Stopped, then New reply.
     const VENDORS = { claude: 'Claude', codex: 'Codex' };
     const alertPills = new Map();
     function since(at) {
@@ -150,11 +150,13 @@
       return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
     }
     function alertContent(vendor, list) {
+      const approval = list.find(a => a.kind === 'approval');
       const waiting = list.find(a => a.kind === 'waiting');
       const errors = list.filter(a => a.kind === 'error');
       const replies = list.filter(a => a.kind === 'reply');
       let tail;
-      if (waiting) tail = el('span', { class: 'alert-text waiting', text: `Waiting · ${since(Number(waiting.at) || Date.now())}` });
+      if (approval) tail = el('span', { class: 'alert-text approval', text: `Approve? · ${since(Number(approval.at) || Date.now())}` });
+      else if (waiting) tail = el('span', { class: 'alert-text waiting', text: `Waiting · ${since(Number(waiting.at) || Date.now())}` });
       else if (errors.length) tail = el('span', { class: 'alert-text stopped', text: 'Stopped' });
       else tail = el('span', { class: 'alert-text reply' }, [glyph('chat'), el('span', { text: replies.length > 1 ? `${replies.length} new replies` : 'New reply' })]);
       return [logo(vendor, 'alert-logo'), el('span', { class: 'alert-name', text: VENDORS[vendor] }), tail];
@@ -190,7 +192,7 @@
       }
       onAlertsChanged();
     }
-    setInterval(() => { if (sessions?.alerts?.some(a => a?.kind === 'waiting')) renderAlerts(); }, 15000);
+    setInterval(() => { if (sessions?.alerts?.some(a => a?.kind === 'waiting' || a?.kind === 'approval')) renderAlerts(); }, 15000);
 
     function hidePill(now = false) {
       clearTimeout(showTimer);

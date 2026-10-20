@@ -137,34 +137,43 @@
     // Elapsed waiting time rounds down, like the capsule (90 s reads 1m).
     const sinceOf = at => durationOf(Math.floor(Math.max(0, Date.now() - at) / 60000) * 60000) || '<1m';
     const alertsOf = id => (getAlerts(id) || []).filter(a => a && typeof a === 'object' && typeof a.id === 'string');
-    // Waiting first, then newest first.
-    const ordered = list => [...list].sort((a, b) => ((b.kind === 'waiting') - (a.kind === 'waiting')) || ((Number(b.at) || 0) - (Number(a.at) || 0)));
+    // Approvals first, then waiting, then newest first.
+    const rank = kind => kind === 'approval' ? 0 : kind === 'waiting' ? 1 : 2;
+    const ordered = list => [...list].sort((a, b) => (rank(a.kind) - rank(b.kind)) || ((Number(b.at) || 0) - (Number(a.at) || 0)));
+
+    function decision(id, act) {
+      return el('button', { class: `alert-${act}`, type: 'button', 'data-act': `approve-${act}`, 'data-id': id }, [el('span', { text: act === 'allow' ? 'Allow once' : 'Deny' })]);
+    }
 
     function alertBlock(alert, item) {
       const vendor = alert.vendor || item.id;
+      const approval = alert.kind === 'approval';
       const waiting = alert.kind === 'waiting';
+      const pending = approval || waiting;
       const error = alert.kind === 'error';
-      const label = waiting ? 'Waiting' : error ? 'Stopped' : 'New reply';
+      const label = approval ? 'Approve?' : waiting ? 'Waiting' : error ? 'Stopped' : 'New reply';
       const head = el('header', { class: 'alert-head' }, [
-        el('span', { class: 'head-logo' }, [window.HudBots.face(vendor, waiting ? 'asking' : 'done', 14)]),
+        el('span', { class: 'head-logo' }, [window.HudBots.face(vendor, pending ? 'asking' : 'done', 14)]),
         el('div', { class: 'alert-who' }, [el('h2', { text: item.name }), alert.model ? el('span', { class: 'alert-model', text: String(alert.model) }) : null]),
-        el('span', { class: `alert-chip ${alert.kind}` }, [waiting ? null : icon('chat'), el('span', { text: label })]),
-        waiting ? null : el('button', { class: 'alert-x', type: 'button', 'data-act': 'dismiss', 'data-id': alert.id, 'aria-label': 'Dismiss', title: 'Dismiss' }, [icon('close')]),
+        el('span', { class: `alert-chip ${alert.kind}` }, [pending ? null : icon('chat'), el('span', { text: label })]),
+        pending ? null : el('button', { class: 'alert-x', type: 'button', 'data-act': 'dismiss', 'data-id': alert.id, 'aria-label': 'Dismiss', title: 'Dismiss' }, [icon('close')]),
       ]);
-      const when = waiting ? `Waiting ${sinceOf(Number(alert.at) || Date.now())}` : clockOf(Number(alert.at));
-      const took = waiting ? '' : durationOf(Number(alert.durationMs));
+      const when = pending ? `Waiting ${sinceOf(Number(alert.at) || Date.now())}` : clockOf(Number(alert.at));
+      const took = pending ? '' : durationOf(Number(alert.durationMs));
       return el('section', { class: `alert-block ${alert.kind || 'reply'}`, 'data-id': alert.id }, [
         head,
         el('h3', { class: 'alert-title', text: alert.title || item.name }),
         waiting ? el('p', { class: 'alert-status', text: 'Waiting for you' }) : error ? el('p', { class: 'alert-status', text: 'Stopped with an error' }) : null,
-        waiting && alert.tool ? el('p', { class: 'alert-tool', text: String(alert.tool) }) : null,
+        pending && alert.tool ? el('p', { class: 'alert-tool', text: String(alert.tool) }) : null,
         !waiting && alert.text ? el('p', { class: 'alert-summary', text: String(alert.text) }) : null,
         // Video layout: time and duration on one line, then the two actions.
         el('div', { class: 'alert-meta' }, [el('span', { class: 'alert-time', text: when }), el('span', { class: 'alert-duration', text: took })]),
-        el('footer', { class: 'alert-foot' }, [
-          el('button', { class: 'alert-link', type: 'button', 'data-act': 'usage' }, [icon('chart'), el('span', { text: 'View token usage' })]),
-          alert.returnable === true ? el('button', { class: 'alert-return', type: 'button', 'data-act': 'return', 'data-id': alert.id }, [icon('arrow'), el('span', { text: 'Return to session' })]) : null,
-        ]),
+        approval
+          ? el('footer', { class: 'alert-foot approval' }, [decision(alert.id, 'deny'), decision(alert.id, 'allow')])
+          : el('footer', { class: 'alert-foot' }, [
+            el('button', { class: 'alert-link', type: 'button', 'data-act': 'usage' }, [icon('chart'), el('span', { text: 'View token usage' })]),
+            alert.returnable === true ? el('button', { class: 'alert-return', type: 'button', 'data-act': 'return', 'data-id': alert.id }, [icon('arrow'), el('span', { text: 'Return to session' })]) : null,
+          ]),
       ]);
     }
 
@@ -234,6 +243,19 @@
         onDismiss([target.dataset.id]);
         target.closest('.alert-block')?.remove();
         if (!root.querySelector('.alert-block')) close(); else { position(false); onChange(); }
+      }
+      if ((act === 'approve-allow' || act === 'approve-deny') && target?.dataset.id) {
+        const id = target.dataset.id;
+        const block = target.closest('.alert-block');
+        const buttons = block ? [...block.querySelectorAll('button')].filter(button => button.dataset.act === 'approve-allow' || button.dataset.act === 'approve-deny') : [target];
+        for (const button of buttons) button.disabled = true;
+        // Buttons re-enable only if the request is lost; a successful decision removes the card.
+        let request;
+        try { request = window.hud.approve(id, act === 'approve-allow' ? 'allow' : 'deny'); }
+        catch { for (const button of buttons) button.disabled = false; return; }
+        Promise.resolve(request).catch(() => {}).finally(() => {
+          for (const button of buttons) button.disabled = false;
+        });
       }
       if (act === 'return' && target?.dataset.id) {
         const id = target.dataset.id;

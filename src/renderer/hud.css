@@ -146,6 +146,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .alert-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #64a8ff; }
 .alert-chip .icon-svg { width: 14px; height: 14px; }
 .alert-chip.waiting { color: var(--warn); }
+.alert-chip.approval { color: var(--warn); }
 .alert-chip.error { color: var(--high); }
 .alert-x { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--text-2); }
 .alert-x:hover { background: rgba(245, 245, 247, 0.08); }
@@ -163,6 +164,13 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .alert-return { margin-left: auto; background: #2f6fe0; color: #fff; font-weight: 500; }
 .alert-return:hover { background: #3a7cf0; }
 .alert-link .icon-svg, .alert-return .icon-svg { width: 11px; height: 11px; }
+/* Approval decisions: destructive outline on the left, primary Allow once on the right. */
+.alert-allow, .alert-deny { padding: 4px 10px; border-radius: 7px; font-size: 11px; }
+.alert-allow { margin-left: auto; background: #2f6fe0; color: #fff; font-weight: 500; }
+.alert-allow:hover { background: #3a7cf0; }
+.alert-deny { color: var(--text-2); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
+.alert-deny:hover { color: var(--text); background: rgba(245, 245, 247, 0.06); }
+.alert-allow:disabled, .alert-deny:disabled { opacity: 0.5; }
 
 /* Persistent alert capsules: clickable, same shape as the hover capsule. */
 .alert-pill { pointer-events: auto; cursor: default; gap: 6px; font-size: 13px; }
@@ -172,6 +180,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .alert-text.reply { color: #64a8ff; }
 .alert-text.reply .icon-svg { width: 15px; height: 15px; }
 .alert-text.waiting { color: var(--warn); }
+.alert-text.approval { color: var(--warn); }
 .alert-text.stopped { color: var(--high); }
 
 /* Bot faces (session phase) replace the logo inside the ring. */
