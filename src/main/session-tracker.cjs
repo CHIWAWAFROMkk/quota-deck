@@ -4,11 +4,16 @@ const capped = (value, max) => typeof value === 'string' ? value.slice(0, max) :
 const notifiable = s => s.vendor === 'claude' ? ['claude-vscode', 'cli'].includes(s.source) : s.source === 'codex-desktop';
 const returnable = s => ['claude-vscode', 'codex-desktop'].includes(s.source);
 const title = s => s.customTitle || s.aiTitle || s.firstPrompt || '';
+const cwdTitle = cwd => {
+  const parts = typeof cwd === 'string' ? cwd.split(/[\\/]+/).filter(Boolean) : [];
+  return capped(parts[parts.length - 1] || '', 60);
+};
 const kinds = new Set(['meta', 'prompt', 'title', 'model', 'tool-call', 'tool-result', 'turn-end', 'interrupt']);
 
 function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterMs = 1800000 }) {
   const sessions = new Map();
   const alerts = new Map();
+  let approvals = [];
 
   function ingest(vendor, event) {
     if (!['claude', 'codex'].includes(vendor) || !event || !kinds.has(event.kind) || typeof event.sessionId !== 'string' || !event.sessionId || !Number.isFinite(event.at)) return;
@@ -82,6 +87,25 @@ function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterM
     }
   }
 
+  function setApprovals(list) {
+    approvals = Array.isArray(list) ? list
+      .filter(item => item && typeof item.id === 'string' && item.id && ['claude', 'codex'].includes(item.vendor))
+      .map(item => ({
+        id: item.id, vendor: item.vendor, sessionId: typeof item.sessionId === 'string' ? item.sessionId : '',
+        cwd: typeof item.cwd === 'string' ? item.cwd : '', tool: capped(item.tool, 80),
+        summary: capped(item.summary, 2048), at: Number.isFinite(item.at) ? item.at : 0,
+      })) : [];
+  }
+
+  function approvalAlert(item) {
+    const s = sessions.get(`${item.vendor}:${item.sessionId}`);
+    return {
+      id: `approval:${item.id}`, vendor: item.vendor, kind: 'approval', sessionId: item.sessionId,
+      title: (s && title(s)) || cwdTitle(item.cwd), model: null, text: item.summary, tool: item.tool,
+      at: item.at, durationMs: null, returnable: false,
+    };
+  }
+
   function snapshot(now) {
     const vendors = { claude: { phase: 'idle', running: 0 }, codex: { phase: 'idle', running: 0 } };
     const current = [...alerts.values()].map(alert => ({ ...alert, title: title(sessions.get(`${alert.vendor}:${alert.sessionId}`)) }));
@@ -97,9 +121,10 @@ function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterM
         at: oldest.at, durationMs: null, returnable: returnable(s),
       });
     }
+    for (const item of approvals) current.push(approvalAlert(item));
     current.sort((a, b) => b.at - a.at);
     for (const [vendor, state] of Object.entries(vendors)) {
-      state.phase = current.some(a => a.vendor === vendor && a.kind === 'waiting') ? 'asking'
+      state.phase = current.some(a => a.vendor === vendor && (a.kind === 'waiting' || a.kind === 'approval')) ? 'asking'
         : current.some(a => a.vendor === vendor) ? 'done' : state.running > 0 ? 'working' : 'idle';
     }
     return { vendors, alerts: current };
@@ -109,7 +134,7 @@ function createSessionTracker({ startedAt, waitingAfterMs = 30000, abandonAfterM
     if (Array.isArray(ids)) for (const id of ids) alerts.delete(id);
   }
 
-  return { ingest, snapshot, dismiss };
+  return { ingest, setApprovals, snapshot, dismiss };
 }
 
 module.exports = { createSessionTracker };
