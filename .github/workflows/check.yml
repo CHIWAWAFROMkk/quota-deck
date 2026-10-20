@@ -12,7 +12,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
+      - name: Unit tests (failures become annotations)
+        run: node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/gh-annotations.mjs --test-reporter-destination=stdout tests/*.test.mjs
       - run: npm run check:desktop
       - name: Build portable app
         shell: pwsh
