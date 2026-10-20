@@ -210,8 +210,8 @@ test('an approval alert shows Approve?, the tool, the summary and two decision b
   assert.equal(queryAll(block, '.alert-chip')[0].textContent, 'Approve?');
   assert.equal(queryAll(block, '.bot.asking').length, 1);
   assert.equal(queryAll(block, '.alert-x').length, 0);
-  assert.equal(queryAll(block, '.alert-tool')[0].textContent, 'Bash');
-  assert.equal(queryAll(block, '.alert-summary')[0].textContent, 'npm test');
+  assert.equal(queryAll(block, '.alert-tool')[0].textContent, 'Bash: npm test');
+  assert.equal(queryAll(block, '.alert-summary').length, 0);
   assert.equal(queryAll(block, '.alert-time')[0].textContent, 'Waiting 1m');
   const allow = byAct(block, 'approve-allow')[0];
   const deny = byAct(block, 'approve-deny')[0];

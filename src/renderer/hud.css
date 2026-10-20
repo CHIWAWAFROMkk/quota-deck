@@ -147,6 +147,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .alert-chip .icon-svg { width: 14px; height: 14px; }
 .alert-chip.waiting { color: var(--warn); }
 .alert-chip.approval { color: var(--warn); }
+/* The command being approved must be readable, not ellipsised: wrap up to three lines. */
+.alert-block.approval .alert-tool { white-space: normal; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .alert-chip.error { color: var(--high); }
 .alert-x { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--text-2); }
 .alert-x:hover { background: rgba(245, 245, 247, 0.08); }

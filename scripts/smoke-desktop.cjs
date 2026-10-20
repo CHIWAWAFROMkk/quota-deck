@@ -304,13 +304,13 @@ app.whenReady().then(async () => {
   pushSessions(snapshotOf('asking', 'idle', [
     alertOf(3, { id: `claude:${sid(3)}:wait:c1`, kind: 'waiting', tool: 'Bash: npm run build', at: Date.now() - 125000 }),
     { id: 'approval:req-1', vendor: 'claude', kind: 'approval', sessionId: sid(3), title: 'QuotaDeck', model: null,
-      text: 'git push origin feat/hud-approval', tool: 'Bash', at: Date.now() - 42000, durationMs: null, returnable: false },
+      text: 'git push origin feat/hud-approval && npm run package:portable -- --out C:/Users/yoshi/Documents/ChatGPT/release/QuotaDeck-0.6.0', tool: 'Bash', at: Date.now() - 42000, durationMs: null, returnable: false },
   ]));
   await until(() => hudEval(`${alertPill('claude')}?.textContent.includes('Approve?')`));
   await click('claude');
   await until(() => hudEval(`${blocks}.length === 2`));
   assert.equal(await hudEval(`${blocks}[0].dataset.id === 'approval:req-1' && ${blocks}[0].querySelector('[data-act=approve-allow]')?.textContent === 'Allow once' && ${blocks}[0].querySelector('[data-act=approve-deny]')?.textContent === 'Deny' && !${blocks}[0].querySelector('[data-act=dismiss]')`), true);
-  assert.equal(await hudEval(`${blocks}[0].textContent.includes('git push origin feat/hud-approval')`), true);
+  assert.equal(await hudEval(`${blocks}[0].textContent.includes('QuotaDeck-0.6.0')`), true);
   await sleep(450);
   await shot('hud-approval');
   await closeCard();

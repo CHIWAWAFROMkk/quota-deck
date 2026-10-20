@@ -164,8 +164,10 @@
         head,
         el('h3', { class: 'alert-title', text: alert.title || item.name }),
         waiting ? el('p', { class: 'alert-status', text: 'Waiting for you' }) : error ? el('p', { class: 'alert-status', text: 'Stopped with an error' }) : null,
-        pending && alert.tool ? el('p', { class: 'alert-tool', text: String(alert.tool) }) : null,
-        !waiting && alert.text ? el('p', { class: 'alert-summary', text: String(alert.text) }) : null,
+        // What is being approved reads like the Waiting card's tool line: "Bash: <command>", monospace.
+        approval && (alert.tool || alert.text) ? (() => { const what = [alert.tool, alert.text].filter(Boolean).map(String).join(': '); return el('p', { class: 'alert-tool', text: what, title: what }); })() : null,
+        waiting && alert.tool ? el('p', { class: 'alert-tool', text: String(alert.tool) }) : null,
+        !pending && alert.text ? el('p', { class: 'alert-summary', text: String(alert.text) }) : null,
         // Video layout: time and duration on one line, then the two actions.
         el('div', { class: 'alert-meta' }, [el('span', { class: 'alert-time', text: when }), el('span', { class: 'alert-duration', text: took })]),
         approval
