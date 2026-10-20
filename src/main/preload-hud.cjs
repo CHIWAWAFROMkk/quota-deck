@@ -25,4 +25,5 @@ contextBridge.exposeInMainWorld('hud', {
   onSessions: (callback) => subscribe('hud:sessions', callback),
   dismiss: (ids) => ipcRenderer.send('hud:dismiss', Array.isArray(ids) ? ids.filter(id => typeof id === 'string').slice(0, 50) : []),
   returnTo: (id) => ipcRenderer.invoke('hud:return', String(id)),
+  approve: (id, decision) => ipcRenderer.invoke('hud:approve', String(id), decision === 'allow' ? 'allow' : 'deny'),
 });

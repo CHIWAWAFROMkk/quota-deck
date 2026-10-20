@@ -3,6 +3,8 @@ const { app, Menu, nativeImage, shell, Tray } = require('electron');
 const { readAll, configureHistory } = require('./snapshot.cjs');
 const { WORKBUDDY_APP_URL } = require('./workbuddy-client.cjs');
 const { connect: connectClaudeStatusLine, disconnect: disconnectClaudeStatusLine } = require('./claude-statusline-chain.cjs');
+const { connect: connectApprovalHooks, connectionState: approvalConnectionState, disconnect: disconnectApprovalHooks } = require('./approval-hook-install.cjs');
+const { createApprovalServer } = require('./approval-server.cjs');
 const { nodePath } = require('./local-paths.cjs');
 const { buildHudItems, buildHudTokens } = require('./hud-view.cjs');
 const { createHud } = require('./hud-window.cjs');
@@ -21,6 +23,8 @@ let stats = null;
 let lastTokens = null;
 let sessionTracker = null;
 let sessionWatcher = null;
+let approvalServer = null;
+let approvalStart = null;
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) app.quit();
@@ -65,6 +69,18 @@ const actions = {
     await shell.openExternal(WORKBUDDY_APP_URL);
     return { status: 'opened', url: WORKBUDDY_APP_URL };
   },
+  'approval-connect': async () => {
+    const result = connectApprovalHooks({ nodePath });
+    await refreshAll().catch(() => {});
+    hud?.pushApprovals?.(approvalConnectionState());
+    return result;
+  },
+  'approval-disconnect': async () => {
+    const result = disconnectApprovalHooks();
+    await refreshAll().catch(() => {});
+    hud?.pushApprovals?.(approvalConnectionState());
+    return result;
+  },
 };
 
 function createTray() {
@@ -101,12 +117,19 @@ app.whenReady().then(() => {
   configureHistory(path.join(app.getPath('userData'), 'quota-history.json'));
   tokenLedger = createTokenLedger();
   stats = createStats({ getTokens: () => lastTokens });
+  approvalServer = createApprovalServer({
+    endpointPath: path.join(app.getPath('appData'), 'QuotaDeck', 'approval-endpoint.json'),
+    onChange: list => { sessionTracker.setApprovals(list); pushSessions(); },
+  });
+  const server = approvalServer;
+  approvalStart = server.start().catch(error => { console.error('审批服务启动失败:', error); });
   hud = createHud({
     settingsPath: path.join(app.getPath('userData'), 'hud-settings.json'),
     onRefresh: () => refreshAll(),
     onAction: name => actions[name](),
     onOpenStats: () => stats.open(),
     onDismiss: dismissSessions,
+    onApprove: async (id, decision) => ({ status: server.decide(id, decision) ? 'decided' : 'gone' }),
     onReturn: async id => {
       const alert = sessionTracker.snapshot(Date.now()).alerts.find(item => item.id === id);
       const url = returnUrl(alert);
@@ -117,6 +140,7 @@ app.whenReady().then(() => {
       return { status: 'opened' };
     },
   });
+  hud.pushApprovals?.(approvalConnectionState());
   sessionWatcher = createSessionWatcher({ tracker: sessionTracker, onChange: snapshot => hud?.pushSessions(snapshot) });
   sessionWatcher.start().catch(() => {});
   createTray();
@@ -130,6 +154,16 @@ app.on('before-quit', () => {
   sessionWatcher?.stop();
   hud?.destroy();
   stats?.destroy();
+  const server = approvalServer;
+  const started = approvalStart;
+  approvalServer = null;
+  approvalStart = null;
+  if (server) {
+    // Stop now if listening; otherwise wait for a start that is still binding the port.
+    const stop = () => { try { server.stop().catch(() => {}); } catch { /* already closed */ } };
+    stop();
+    started?.then(stop).catch(() => {});
+  }
 });
 
 app.on('window-all-closed', () => {});

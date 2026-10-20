@@ -12,10 +12,10 @@ const TOP_LEVEL = 'normal';
 // Forwarded mouse events flap between enter and leave on Windows, so the main process
 // decides click-through itself by polling the cursor against the rectangles the page reports.
 const POLL_MS = 40;
-const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy'];
+const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy', 'approval-connect', 'approval-disconnect'];
 const SETTING_KEYS = ['size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
 const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card', 'hud:strips', 'hud:dismiss'];
-const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats', 'hud:return'];
+const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats', 'hud:return', 'hud:approve'];
 
 function loadSettings(file) {
   try { return normalizeHudSettings(JSON.parse(fs.readFileSync(file, 'utf8'))); }
@@ -32,11 +32,15 @@ function saveSettings(file, settings) {
 }
 
 // What the page draws from; position and visibility stay in the main process.
-const displaySettings = s => ({ size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers, metrics: { ...s.metrics } });
+const displaySettings = (s, approvals) => ({
+  size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers,
+  metrics: { ...s.metrics }, ...(approvals ? { approvals } : {}),
+});
 
 // `electron` is injectable so tests can drive the window logic with fakes.
 function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 'ignored' }), onOpenStats = () => {},
-  onDismiss = () => {}, onReturn = async () => ({ status: 'unavailable' }), electron = require('electron') }) {
+  onDismiss = () => {}, onReturn = async () => ({ status: 'unavailable' }), onApprove = async () => ({ status: 'unavailable' }),
+  electron = require('electron') }) {
   const { BrowserWindow, ipcMain, screen } = electron;
   let settings = loadSettings(settingsPath);
   let win = null;
@@ -44,6 +48,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   let strips = DEFAULT_STRIPS;
   let items = [];
   let tokens = null;
+  let approvals = null;
   let sessions = { vendors: { claude: { phase: 'idle', running: 0 }, codex: { phase: 'idle', running: 0 } }, alerts: [] };
   let drag = null;
   let ignoring = null;
@@ -143,9 +148,9 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     if (p.resetPosition === true) Object.assign(merged, { displayId: DEFAULT_SETTINGS.displayId, edge: DEFAULT_SETTINGS.edge, offset: DEFAULT_SETTINGS.offset });
     settings = normalizeHudSettings(merged);
     saveSettings(settingsPath, settings);
-    send('hud:settings', displaySettings(settings));
+    send('hud:settings', displaySettings(settings, approvals));
     place();
-    return displaySettings(settings);
+    return displaySettings(settings, approvals);
   }
 
   function create() {
@@ -170,7 +175,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
       place(true);
       // Items before settings, so the page's first measurement already has all five numbers.
       send('hud:state', items);
-      send('hud:settings', displaySettings(settings));
+      send('hud:settings', displaySettings(settings, approvals));
       if (tokens) send('hud:tokens', tokens);
       send('hud:sessions', sessions);
       if (settings.visible) reveal();
@@ -218,11 +223,15 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     if (typeof id !== 'string' || id.length > 200) return { status: 'unavailable' };
     return onReturn(id);
   }));
-  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, sessions, layout: layoutMessage(), settings: displaySettings(settings) })));
+  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, sessions, layout: layoutMessage(), settings: displaySettings(settings, approvals) })));
   ipcMain.handle('hud:refresh', guard(async () => { await onRefresh(); return true; }));
   ipcMain.handle('hud:action', guard(name => {
     if (typeof name !== 'string' || !ACTIONS.includes(name)) throw new Error('未知操作');
     return onAction(name);
+  }));
+  ipcMain.handle('hud:approve', guard((id, decision) => {
+    if (typeof id !== 'string' || !id.startsWith('approval:') || (decision !== 'allow' && decision !== 'deny')) throw new Error('未知操作');
+    return onApprove(id.slice(9), decision);
   }));
   ipcMain.handle('hud:settings', guard(patch => applySettings(patch)));
   ipcMain.handle('hud:open-stats', guard(() => { onOpenStats(); return true; }));
@@ -249,6 +258,10 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     pushState(next) { items = Array.isArray(next) ? next : []; send('hud:state', items); },
     pushTokens(next) { tokens = next; send('hud:tokens', tokens); },
     pushSessions(next) { sessions = next; send('hud:sessions', sessions); },
+    pushApprovals(next) {
+      approvals = next && typeof next === 'object' && !Array.isArray(next) ? next : null;
+      send('hud:settings', displaySettings(settings, approvals));
+    },
     reload() {
       recoveries = [];
       if (!alive()) { create(); return; }
