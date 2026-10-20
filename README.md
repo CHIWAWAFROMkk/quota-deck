@@ -78,8 +78,8 @@ WorkBuddy 默认从 `%APPDATA%/QuotaDeck/workbuddy-usage.json` 读取，格式�
 
 ```powershell
 npm run check:desktop
-npm run package:portable -- -OutputName QuotaDeck-0.5.0-rc.5
-pwsh -NoProfile -File scripts/install-shortcuts.ps1 -InstallDirectory dist/QuotaDeck-0.5.0-rc.5
+npm run package:portable -- -OutputName QuotaDeck-0.6.0
+pwsh -NoProfile -File scripts/install-shortcuts.ps1 -InstallDirectory dist/QuotaDeck-0.6.0
 ```
 
 打包复制精确锁定版本的 Electron 与应用源码，不复制 `data/`、凭证或开发测试数据；包含逐文件 SHA-256 清单。当前为未签名候选版，不绕过 Windows 安全提示。
