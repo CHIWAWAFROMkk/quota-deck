@@ -60,9 +60,13 @@ function hasOurs(file) {
 }
 
 function hookGroup(vendor, nodePath) {
-  // One command line, quoted like the statusline bridge that already runs on this machine:
-  // Codex's hooks.json is not documented to accept `args`, a single command string works for both.
-  return { matcher: '*', hooks: [{ type: 'command', command: `"${forward(nodePath)}" "${forward(HOOK_SCRIPT)}" --vendor ${vendor}`, timeout: 120 }] };
+  // Claude Code: exec form (command + args) runs node directly with no shell; a plain command
+  // string goes through Git Bash on Windows and fails where Bash cannot be found (seen 2026-10-20).
+  // Codex documents only a command string, so it keeps the quoted one-line form.
+  const hook = vendor === 'claude'
+    ? { type: 'command', command: nodePath, args: [HOOK_SCRIPT, '--vendor', 'claude'], timeout: 120 }
+    : { type: 'command', command: `"${forward(nodePath)}" "${forward(HOOK_SCRIPT)}" --vendor ${vendor}`, timeout: 120 };
+  return { matcher: '*', hooks: [hook] };
 }
 
 function connectionState({ settingsPath = claudeSettingsPath(), codexPath = codexHooksPath() } = {}) {

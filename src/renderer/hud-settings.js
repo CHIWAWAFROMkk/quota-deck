@@ -72,7 +72,8 @@
       const connected = approvals.claude === true || approvals.codex === true;
       approvalBox.replaceChildren(...[
         el('span', { class: 'set-note', text: connected ? 'Connected' : 'Not connected' }),
-        approvals.codexAvailable === true && approvals.codex !== true ? el('span', { class: 'set-note', text: 'Codex: run /hooks once to trust' }) : null,
+        // Trust is needed once the Codex hook is installed: Codex ignores untrusted hooks until /hooks.
+        approvals.codex === true ? el('span', { class: 'set-note', text: 'Codex: run /hooks once to trust' }) : null,
         action(connected ? 'approval-disconnect' : 'approval-connect', connected ? 'Disconnect' : 'Connect'),
       ].filter(Boolean));
     }

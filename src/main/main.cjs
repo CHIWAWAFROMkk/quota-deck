@@ -70,14 +70,14 @@ const actions = {
     return { status: 'opened', url: WORKBUDDY_APP_URL };
   },
   'approval-connect': async () => {
+    // Only hook files change; push the new state at once instead of waiting on a quota refresh.
     const result = connectApprovalHooks({ nodePath });
-    await refreshAll().catch(() => {});
     hud?.pushApprovals?.(approvalConnectionState());
     return result;
   },
   'approval-disconnect': async () => {
+    // Only hook files change; push the new state at once instead of waiting on a quota refresh.
     const result = disconnectApprovalHooks();
-    await refreshAll().catch(() => {});
     hud?.pushApprovals?.(approvalConnectionState());
     return result;
   },

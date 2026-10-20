@@ -50,7 +50,8 @@ test('connect writes our hook into both files, keeping other entries and setting
   assert.deepEqual(groups[0], claude.hooks.PermissionRequest[0]);
   assert.equal(groups[1].matcher, '*');
   const forward = file => file.replace(/\\/g, '/');
-  assert.deepEqual(groups[1].hooks, [{ type: 'command', command: `"${forward(process.execPath)}" "${forward(hooks.HOOK_SCRIPT)}" --vendor claude`, timeout: 120 }]);
+  assert.equal(forward(process.execPath).length > 0, true);
+  assert.deepEqual(groups[1].hooks, [{ type: 'command', command: process.execPath, args: [hooks.HOOK_SCRIPT, '--vendor', 'claude'], timeout: 120 }]);
   assert.equal(hooks.isOurs(groups[1].hooks[0]), true);
 
   const afterCodex = read(box.codex);

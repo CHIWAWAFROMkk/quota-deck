@@ -297,15 +297,16 @@ test('the Approvals row follows the pushed connection state and the Codex trust 
   const state = { size: 22, ringWidth: 1.5, showsRings: true, showsNumbers: true, approvals: { claude: false, codex: false, codexAvailable: true } };
   const { row, nodes } = settingsHarness(state);
   assert.equal(queryAll(row, '.set-note')[0].textContent, 'Not connected');
-  assert.ok(queryAll(row, '.set-note').some(note => note.textContent === 'Codex: run /hooks once to trust'));
+  assert.equal(queryAll(row, '.set-note').some(note => note.textContent === 'Codex: run /hooks once to trust'), false, 'nothing to trust before the hook is installed');
   state.approvals = { claude: true, codex: false, codexAvailable: true };
   nodes.update();
   assert.equal(queryAll(row, '.set-note')[0].textContent, 'Connected');
   assert.ok(queryAll(row, 'button').some(button => button.textContent === 'Disconnect'));
   assert.equal(queryAll(row, 'button').some(button => button.textContent === 'Connect'), false);
+  assert.equal(queryAll(row, '.set-note').some(note => note.textContent === 'Codex: run /hooks once to trust'), false);
   state.approvals = { claude: true, codex: true, codexAvailable: true };
   nodes.update();
-  assert.equal(queryAll(row, '.set-note').some(note => note.textContent === 'Codex: run /hooks once to trust'), false);
+  assert.ok(queryAll(row, '.set-note').some(note => note.textContent === 'Codex: run /hooks once to trust'), 'installed Codex hook still needs /hooks trust');
 });
 
 function stripHarness(now) {
