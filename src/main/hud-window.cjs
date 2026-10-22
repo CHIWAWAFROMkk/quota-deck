@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { isTrustedRenderer } = require('./security.cjs');
-const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, isValidSetting, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
+const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, isValidSetting, layoutHud, layoutNotch, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
 
 const hudEntry = path.join(__dirname, '..', 'renderer', 'hud.html');
 const DRAG_LIMIT_MS = 60_000;
@@ -13,7 +13,7 @@ const TOP_LEVEL = 'normal';
 // decides click-through itself by polling the cursor against the rectangles the page reports.
 const POLL_MS = 40;
 const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy', 'approval-connect', 'approval-disconnect'];
-const SETTING_KEYS = ['size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
+const SETTING_KEYS = ['style', 'size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
 const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card', 'hud:strips', 'hud:dismiss'];
 const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats', 'hud:return', 'hud:approve'];
 
@@ -33,7 +33,7 @@ function saveSettings(file, settings) {
 
 // What the page draws from; position and visibility stay in the main process.
 const displaySettings = (s, approvals) => ({
-  size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers,
+  style: s.style, size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers,
   metrics: { ...s.metrics }, ...(approvals ? { approvals } : {}),
 });
 
@@ -55,10 +55,13 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   let recoveries = [];
   let hits = [];
   let poll = null;
+  let gaming = false;
 
   const alive = () => win && !win.isDestroyed();
   const send = (channel, payload) => { try { if (alive()) win.webContents.send(channel, payload); } catch { /* renderer restarting */ } };
-  const layoutMessage = () => (layout ? { edge: layout.edge, strip: layout.strip, size: { width: layout.window.width, height: layout.window.height }, dragging: Boolean(drag) } : null);
+  const layoutMessage = () => (layout ? { mode: layout.mode || 'strip', edge: layout.edge, strip: layout.strip,
+    ...(layout.mode === 'notch' ? { notch: layout.notch } : {}),
+    size: { width: layout.window.width, height: layout.window.height }, dragging: Boolean(drag) } : null);
   const trusted = event => alive() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && isTrustedRenderer(event.senderFrame.url, hudEntry);
 
   function setIgnore(flag) {
@@ -70,7 +73,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
 
   // Windows drops a topmost flag set before the first show, so set it again on every reveal.
   function reveal() {
-    if (!alive()) return;
+    if (!alive() || gaming || !settings.visible) return;
     win.showInactive();
     win.setAlwaysOnTop(true, TOP_LEVEL);
   }
@@ -79,7 +82,8 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   function place(force = false) {
     if (!alive()) return;
     const display = pickDisplay(screen.getAllDisplays(), screen.getPrimaryDisplay(), settings.displayId);
-    const next = layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset, strips });
+    const next = settings.style === 'notch' ? layoutNotch({ workArea: display.workArea })
+      : layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset, strips });
     const moved = !layout || JSON.stringify(next.window) !== JSON.stringify(layout.window);
     const changed = moved || JSON.stringify(next) !== JSON.stringify(layout);
     layout = next;
@@ -99,8 +103,33 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   }
 
   function trackPointer() {
-    if (!alive() || drag || !win.isVisible()) return;
+    if (gaming || !alive() || drag || !win.isVisible()) return;
     setIgnore(!pointerOverHits({ cursor: screen.getCursorScreenPoint(), bounds: win.getBounds(), hits }));
+  }
+
+  function resumePolling() {
+    if (!gaming && alive() && !poll) poll = setInterval(trackPointer, POLL_MS);
+  }
+
+  function setGaming(next) {
+    if (typeof next !== 'boolean' || next === gaming) return;
+    gaming = next;
+    if (gaming) {
+      clearInterval(poll);
+      poll = null;
+      if (alive() && win.isVisible()) win.hide();
+      resetInteraction();
+      send('hud:gaming', true);
+    } else {
+      if (settings.visible) {
+        if (!alive()) create();
+        else { place(); reveal(); }
+      }
+      resumePolling();
+      // Deliver the accumulated alerts before the page's resume pulse.
+      send('hud:sessions', sessions);
+      send('hud:gaming', false);
+    }
   }
 
   // Every tick the strip jumps to the edge nearest the pointer, keeping the grabbed point under it.
@@ -114,7 +143,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   }
 
   function startDrag() {
-    if (drag || !alive() || !layout) return;
+    if (gaming || settings.style === 'notch' || drag || !alive() || !layout) return;
     const cursor = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const vertical = layout.edge === 'left' || layout.edge === 'right';
@@ -147,6 +176,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     }
     if (p.resetPosition === true) Object.assign(merged, { displayId: DEFAULT_SETTINGS.displayId, edge: DEFAULT_SETTINGS.edge, offset: DEFAULT_SETTINGS.offset });
     settings = normalizeHudSettings(merged);
+    if (settings.style === 'notch' && drag) { clearInterval(drag.timer); drag = null; }
     saveSettings(settingsPath, settings);
     send('hud:settings', displaySettings(settings, approvals));
     place();
@@ -178,6 +208,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
       send('hud:settings', displaySettings(settings, approvals));
       if (tokens) send('hud:tokens', tokens);
       send('hud:sessions', sessions);
+      send('hud:gaming', gaming);
       if (settings.visible) reveal();
     });
     win.webContents.on('render-process-gone', (_event, details) => {
@@ -191,7 +222,8 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     });
     win.on('closed', () => { if (win === created) { win = null; clearInterval(poll); poll = null; if (drag) { clearInterval(drag.timer); drag = null; } } });
     clearInterval(poll);
-    poll = setInterval(trackPointer, POLL_MS);
+    poll = null;
+    resumePolling();
     win.loadFile(hudEntry).catch(() => {});
   }
 
@@ -199,7 +231,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   ipcMain.on('hud:hits', (event, rects) => { if (trusted(event)) hits = normalizeHits(rects); });
   ipcMain.on('hud:drag', (event, phase) => { if (!trusted(event)) return; if (phase === 'start') startDrag(); else if (phase === 'end') endDrag(); });
   ipcMain.on('hud:card', (event, open) => {
-    if (!trusted(event) || typeof open !== 'boolean') return;
+    if (!trusted(event) || typeof open !== 'boolean' || (gaming && open)) return;
     win.setFocusable(open);
     if (open) win.focus();
   });
@@ -223,7 +255,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     if (typeof id !== 'string' || id.length > 200) return { status: 'unavailable' };
     return onReturn(id);
   }));
-  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, sessions, layout: layoutMessage(), settings: displaySettings(settings, approvals) })));
+  ipcMain.handle('hud:initial', guard(() => ({ items, tokens, sessions, gaming, layout: layoutMessage(), settings: displaySettings(settings, approvals) })));
   ipcMain.handle('hud:refresh', guard(async () => { await onRefresh(); return true; }));
   ipcMain.handle('hud:action', guard(name => {
     if (typeof name !== 'string' || !ACTIONS.includes(name)) throw new Error('未知操作');
@@ -244,10 +276,13 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   if (settings.visible) create();
 
   return {
+    setGaming,
+    getGames: () => [...settings.games],
     isVisible: () => settings.visible,
     show() {
       settings = { ...settings, visible: true };
       saveSettings(settingsPath, settings);
+      if (gaming) return;
       if (!alive()) create(); else { place(); reveal(); }
     },
     hide() {

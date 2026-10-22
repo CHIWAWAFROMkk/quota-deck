@@ -17,7 +17,7 @@ Windows 桌面 AI 额度显示器与本地 Agent 并行任务入口。使用 Ele
 
 ## 贴边 HUD
 
-界面照 Agent HUD（`jazzenchen/agent-hud-open`，Apache-2.0）的简约形态复刻，QuotaDeck 只有这一种界面：
+界面照 Agent HUD（`jazzenchen/agent-hud-open`，Apache-2.0）的简约形态复刻。默认是贴边浮条，也可以换成顶部正中的[刘海](#刘海模式)：
 
 - 屏幕边缘一条小浮条，Codex、Claude、Antigravity、WorkBuddy、DeepSeek 各一个额度圆环；数字是已用比例（余额类写余额），不到 70% 绿、70% 起黄、90% 起红，没读到写 `–`。
 - 鼠标停在图标上 0.4 秒，旁边伸出一行明细，例如 `5h 12%  Weekly 79%  Opus 60%`。
@@ -32,6 +32,25 @@ Windows 桌面 AI 额度显示器与本地 Agent 并行任务入口。使用 Ele
 - 提醒一直留到你看过：关上卡片、点 ×、点 `Return to session`，或在那个会话里发新消息。`Return to session` 会打开 VS Code 里对应的 Claude 对话（`vscode://anthropic.claude-code/open?session=…`），或 Codex 桌面版（`codex://threads/…`）。
 - `Waiting` 是推测：某个工具调用超过 30 秒还没结果，就当作可能在等你批准。很长的命令（比如编译）也会被这样标出来。
 - 只提醒你自己开的会话：Codex 只看桌面版里的会话，`codex exec` 和子代理不提醒；Claude 不提醒 `-p` / SDK 自动跑的会话。回复内容只在内存里，不写盘。
+
+### 刘海模式
+
+- 卡片齿轮 → Display → `Style` 选 `Notch`，浮条换成屏幕顶部正中的一块黑色刘海；选 `Strip` 换回浮条，浮条回到原来的位置。
+- 刘海外面一圈光晕，从左到右依次是 Codex、Claude、Antigravity、WorkBuddy、DeepSeek，颜色和圆环一致：绿、黄、红表示额度用了多少，灰色是没读到。全部没读到时整圈淡灰、不动。
+- 光晕会呼吸：有会话在跑时 3 秒一次，都闲着时 7 秒一次。来了新提醒，那一家对应的那一段闪一下：做完闪蓝，在等你或要批准闪橙。
+- 有提醒时刘海向两边长出翅膀：左边是 bot 和厂商名，右边是 `Approve?` / `Waiting` / `Stopped` / `New reply`，同一家多条时加 `×N`。几家同时有提醒时只显示最该处理的那条（批准 > 等待 > 出错 > 新回复）。点翅膀打开那一家的提醒卡片。
+- 鼠标停在刘海上 0.4 秒，它稍微变宽，露出五个圆环（不显示数字）；点圆环打开那一家的卡片。Size、Show rings、Ring thickness 对刘海里的圆环同样有效。
+
+### 打游戏时自动安静
+
+- 以下任一情况算在打游戏，整个 HUD（浮条或刘海、提醒、卡片）都会隐藏：
+  - 程序在独占全屏运行 Direct3D；
+  - 前台窗口占满整块屏幕，且程序在 Steam 游戏库里（路径含 `\steamapps\common\`）；
+  - 前台窗口占满整块屏幕，且程序名在游戏名单里。
+- 浏览器或播放器全屏看视频不算，HUD 照常显示。
+- 游戏中提醒和批准请求照常攒着；退出游戏后约 2 秒 HUD 回来，攒下的提醒照常出现，光晕补闪一次。托盘里手动隐藏的 HUD 不会因为进出游戏自己冒出来。
+- 游戏名单在 `%APPDATA%\QuotaDeck\hud-settings.json` 的 `games` 键里，是一组 exe 文件名，不区分大小写。默认包括 `cs2.exe`（完美世界 CS2）、`tlou-ii.exe` / `tlou-ii-l.exe`（最后生还者 2）和 `javaw.exe`（Minecraft，只有占满全屏时才算）。先从托盘退出 QuotaDeck 再改（运行中保存设置会覆盖手改的内容），改完启动生效；写错的项会被忽略。
+- 检测用一个后台 PowerShell 小进程，每 1.5 秒看一次前台程序名、路径和是否占满屏幕，不读窗口标题。它起不来时就当作没在打游戏。
 
 ## 运行
 

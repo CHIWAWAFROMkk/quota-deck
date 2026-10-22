@@ -10,7 +10,9 @@ import trackerModule from '../src/main/session-tracker.cjs';
 const realRequire = createRequire(new URL('../src/main/main.cjs', import.meta.url));
 const sessionId = '11111111-2222-3333-4444-555555555555';
 function setup({ failOpen = false } = {}) {
-  let ready, hudOptions, watcherOptions, tracker;
+  let ready, hudOptions, watcherOptions, tracker, detectorOptions;
+  let detectorStarts = 0, detectorStops = 0;
+  const gaming = [];
   let starts = 0, stops = 0;
   const sent = [], opened = [];
   const now = 100000;
@@ -19,7 +21,7 @@ function setup({ failOpen = false } = {}) {
     getPath: () => 'synthetic-user-data', quit() {},
   });
   const icon = { isEmpty: () => false, resize() { return this; } };
-  const hud = { isVisible: () => false, pushSessions: snapshot => sent.push(snapshot), pushState() {}, pushTokens() {}, destroy() {} };
+  const hud = { isVisible: () => false, getGames: () => ['custom.exe'], setGaming: value => gaming.push(value), pushSessions: snapshot => sent.push(snapshot), pushState() {}, pushTokens() {}, destroy() {} };
   class Tray extends EventEmitter { setToolTip() {} setContextMenu() {} }
   const modules = {
     electron: { app, Tray, Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => icon }, shell: { openExternal: async url => { opened.push(url); if (failOpen) throw new Error('synthetic launcher error'); } } },
@@ -28,6 +30,7 @@ function setup({ failOpen = false } = {}) {
     './claude-statusline-chain.cjs': {}, './local-paths.cjs': {},
     './hud-view.cjs': { buildHudItems: () => [], buildHudTokens: value => value },
     './hud-window.cjs': { createHud: options => { hudOptions = options; return hud; } },
+    './game-detector.cjs': { createGameDetector: options => { detectorOptions = options; return { start: () => { detectorStarts++; }, stop: () => { detectorStops++; } }; } },
     './token-ledger.cjs': { createTokenLedger: () => ({ read: async () => ({}) }) },
     './stats-window.cjs': { createStats: () => ({ open() {}, push() {}, destroy() {} }) },
     './session-tracker.cjs': { createSessionTracker: options => { tracker = trackerModule.createSessionTracker(options); return tracker; } },
@@ -46,7 +49,8 @@ function setup({ failOpen = false } = {}) {
     tracker.ingest('claude', { kind: 'turn-end', sessionId: id, at, text: 'Done' });
     return `claude:${id}:${at}`;
   }
-  return { app, sent, opened, finish, hud: () => hudOptions, watcher: () => watcherOptions, tracker: () => tracker, starts: () => starts, stops: () => stops };
+  return { app, sent, opened, finish, hud: () => hudOptions, watcher: () => watcherOptions, tracker: () => tracker, starts: () => starts, stops: () => stops,
+    detector: () => detectorOptions, detectorStarts: () => detectorStarts, detectorStops: () => detectorStops, gaming };
 }
 
 test('main starts session monitoring independently of HUD visibility and stops on quit', () => {
@@ -92,4 +96,16 @@ test('main preserves an unread reply when launching the session fails', async ()
     assert.equal((await s.hud().onReturn(id)).status, 'unavailable');
     assert.equal(s.tracker().snapshot(100001).alerts[0].id, id);
   } finally { s.app.emit('before-quit'); }
+});
+
+test('main starts the game detector with HUD games, forwards changes and stops on quit', () => {
+  const s = setup();
+  try {
+    assert.equal(s.detectorStarts(), 1);
+    assert.deepEqual(s.detector().getGames(), ['custom.exe']);
+    s.detector().onChange(true, 'custom.exe');
+    s.detector().onChange(false, null);
+    assert.deepEqual(s.gaming, [true, false]);
+  } finally { s.app.emit('before-quit'); }
+  assert.equal(s.detectorStops(), 1);
 });

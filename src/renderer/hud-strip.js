@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const { el, icon: glyph, logo } = window.HudDom;
+  const { el, icon: glyph, logo, ring } = window.HudDom;
   const { CLICK_SLOP, HOLD_MS, isClick, metrics: metricsFor, stripSize } = window.HudMetrics;
   const SHOW_MS = 400;
   const HIDE_MS = 200;
@@ -22,16 +22,6 @@
     const ctx = document.createElement('canvas').getContext('2d');
     const vertical = () => edge === 'left' || edge === 'right';
     const current = () => (vertical() ? sizes.vertical : sizes.horizontal);
-
-    function ring(item, size, width) {
-      const c = size / 2;
-      const r = (size - width) / 2;
-      const used = item.ring.usedPct;
-      return el('svg:svg', { class: `ring ${item.ring.level}${item.ring.dashed ? ' dashed' : ''}`, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': 'true' }, [
-        el('svg:circle', { class: 'track', cx: c, cy: c, r }),
-        used > 0 ? el('svg:circle', { class: 'value', cx: c, cy: c, r, pathLength: 100, 'stroke-dasharray': `${Math.min(used, 100)} 100`, transform: `rotate(-90 ${c} ${c})` }) : null,
-      ]);
-    }
 
     // Number widths are measured once per render and drive both orientations' sizes,
     // which the main process needs to place the window and to snap while dragging.

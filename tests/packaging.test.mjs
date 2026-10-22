@@ -22,6 +22,7 @@ function fixture({ version = '44.4.5', machine = 0x8664 } = {}) {
   for (const name of ['hud.html', 'hud.css', 'hud.js', 'hud-card.js', 'chart.css', 'stats.html', 'stats.js', 'app.js', 'index.html', 'styles.css']) fs.writeFileSync(path.join(dir, 'src/renderer', name), 'fixture');
   for (const name of ['LICENSE', 'README.md']) fs.writeFileSync(path.join(dir, name), 'fixture');
   fs.writeFileSync(path.join(dir, 'src/main/main.cjs'), 'fixture');
+  fs.copyFileSync(path.join(root, 'src/main/game-probe.ps1'), path.join(dir, 'src/main/game-probe.ps1'));
   const executable = Buffer.alloc(256);
   executable.writeUInt16LE(0x5a4d, 0);
   executable.writeUInt32LE(128, 0x3c);
@@ -57,6 +58,7 @@ test('packager prefers matching installed runtime and emits verifiable manifest 
   assert.ok(manifest.files.some(file => file.path === 'resources/app/LICENSE'));
   assert.ok(manifest.files.some(file => file.path === 'resources/app/README.md'));
   assert.ok(manifest.files.some(file => file.path === 'resources/app/src/renderer/hud.js'));
+  assert.ok(manifest.files.some(file => file.path === 'resources/app/src/main/game-probe.ps1'));
   for (const shipped of ['hud-card.js', 'chart.css', 'stats.html', 'stats.js']) assert.ok(manifest.files.some(file => file.path === `resources/app/src/renderer/${shipped}`), shipped);
   for (const local of ['app.js', 'index.html', 'styles.css']) assert.equal(manifest.files.some(file => file.path === `resources/app/src/renderer/${local}`), false, `${local} must not ship`);
   for (const file of ['README.md', 'install-shortcuts.ps1', 'verify-package.ps1']) assert.ok(manifest.files.some(entry => entry.path === file));

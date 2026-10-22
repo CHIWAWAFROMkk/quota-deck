@@ -198,3 +198,28 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 @keyframes bot-knock { 0%, 70%, 100% { transform: translateY(0); } 78% { transform: translateY(-2.2px); } 86% { transform: translateY(0); } 92% { transform: translateY(-1px); } }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Notch (video 25s): a black block hanging from the top edge, ears curving into the screen edge,
+   and a glow coloured by each vendor's quota level that breathes faster while agents run. */
+.notch { position: absolute; z-index: 2; --r: 12px; transition: left 0.4s var(--ease), width 0.4s var(--ease), height 0.4s var(--ease); }
+.notch-body { position: absolute; inset: 0; background: #000; border-radius: 0 0 var(--r) var(--r); transition: border-radius 0.4s var(--ease); }
+.notch-body::before, .notch-body::after { content: ''; position: absolute; top: 0; width: 8px; height: 8px; }
+.notch-body::before { left: -8px; background: radial-gradient(circle at 0 100%, transparent 7.5px, #000 8px); }
+.notch-body::after { right: -8px; background: radial-gradient(circle at 100% 100%, transparent 7.5px, #000 8px); }
+.notch-glow, .notch-flash { position: absolute; left: -14px; right: -14px; top: 0; bottom: -14px; border-radius: 0 0 calc(var(--r) + 14px) calc(var(--r) + 14px); filter: blur(8px); pointer-events: none; }
+.notch-glow { opacity: 0.9; animation: notch-breath var(--breath, 7s) ease-in-out infinite; }
+.notch-glow.still { animation: none; opacity: 0.35; }
+.notch-seg { position: absolute; top: 0; bottom: 0; background: var(--pulse, transparent); opacity: 0; }
+.notch-seg.pulse { animation: notch-pulse 1.8s ease-out 1; }
+@keyframes notch-breath { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.36; } }
+@keyframes notch-pulse { 0% { opacity: 0; } 20% { opacity: 1; } 100% { opacity: 0; } }
+.notch-wings, .notch-rings { position: absolute; inset: 0; display: flex; align-items: center; opacity: 0; visibility: hidden; transition: opacity 0.15s ease-out, visibility 0s 0.15s; }
+.notch[data-view="wings"] .notch-wings, .notch[data-view="rings"] .notch-rings { opacity: 1; visibility: visible; transition: opacity 0.25s ease-out 0.15s, visibility 0s; }
+.notch-wings { justify-content: space-between; padding: 0 16px; }
+.wing-l, .wing-r { width: 112px; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.wing-r { justify-content: flex-end; }
+.wing-l .bot { position: static; transform: none; flex: none; }
+.wing-name { font-size: 13px; font-weight: 600; }
+.notch-wings .alert-text { font-size: 13px; }
+.notch-rings { justify-content: center; }
+.pick.wide { width: auto; padding: 0 8px; font-size: 12px; }
