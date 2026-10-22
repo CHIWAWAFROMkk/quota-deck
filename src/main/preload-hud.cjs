@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('hud', {
   onLayout: (callback) => subscribe('hud:layout', callback),
   onSettings: (callback) => subscribe('hud:settings', callback),
   onSessions: (callback) => subscribe('hud:sessions', callback),
+  onGaming: (callback) => subscribe('hud:gaming', value => callback(value === true)),
   dismiss: (ids) => ipcRenderer.send('hud:dismiss', Array.isArray(ids) ? ids.filter(id => typeof id === 'string').slice(0, 50) : []),
   returnTo: (id) => ipcRenderer.invoke('hud:return', String(id)),
   approve: (id, decision) => ipcRenderer.invoke('hud:approve', String(id), decision === 'allow' ? 'allow' : 'deny'),

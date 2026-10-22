@@ -35,10 +35,21 @@
     return el('svg:svg', { class: `icon-svg ${kind}`, viewBox: '0 0 16 16', 'aria-hidden': 'true' }, body.map(([tag, attrs]) => el(`svg:${tag}`, attrs)));
   }
 
+  // Quota ring in the item's level colour; the used share runs clockwise from the top.
+  function ring(item, size, width) {
+    const c = size / 2;
+    const r = (size - width) / 2;
+    const used = item.ring.usedPct;
+    return el('svg:svg', { class: `ring ${item.ring.level}${item.ring.dashed ? ' dashed' : ''}`, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': 'true' }, [
+      el('svg:circle', { class: 'track', cx: c, cy: c, r }),
+      used > 0 ? el('svg:circle', { class: 'value', cx: c, cy: c, r, pathLength: 100, 'stroke-dasharray': `${Math.min(used, 100)} 100`, transform: `rotate(-90 ${c} ${c})` }) : null,
+    ]);
+  }
+
   const logo = (id, className) => el('img', { class: className, src: `../../assets/logos/${id}.svg`, alt: '', draggable: 'false' });
   const fmtInt = n => Math.round(n).toLocaleString('en-US');
   // "Mon 12 Oct at 15:30 – 15:45"
   const periodText = (start, end) => `${DAYS[start.getDay()]} ${start.getDate()} ${MONTHS[start.getMonth()]} at ${hm(start)} – ${hm(end)}`;
 
-  window.HudDom = { el, icon, logo, fmtInt, periodText, hm };
+  window.HudDom = { el, icon, ring, logo, fmtInt, periodText, hm };
 })();
