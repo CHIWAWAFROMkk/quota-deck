@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { isTrustedRenderer } = require('./security.cjs');
-const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, isValidSetting, layoutHud, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
+const { DEFAULT_SETTINGS, DEFAULT_STRIPS, WINDOW, isValidSetting, layoutHud, layoutNotch, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge } = require('./hud-geometry.cjs');
 
 const hudEntry = path.join(__dirname, '..', 'renderer', 'hud.html');
 const DRAG_LIMIT_MS = 60_000;
@@ -13,7 +13,7 @@ const TOP_LEVEL = 'normal';
 // decides click-through itself by polling the cursor against the rectangles the page reports.
 const POLL_MS = 40;
 const ACTIONS = ['claude-connect', 'claude-disconnect', 'claude-help', 'open-workbuddy', 'approval-connect', 'approval-disconnect'];
-const SETTING_KEYS = ['size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
+const SETTING_KEYS = ['style', 'size', 'ringWidth', 'showsRings', 'showsNumbers', 'metrics'];
 const SEND_CHANNELS = ['hud:hits', 'hud:drag', 'hud:card', 'hud:strips', 'hud:dismiss'];
 const INVOKE_CHANNELS = ['hud:initial', 'hud:refresh', 'hud:action', 'hud:settings', 'hud:open-stats', 'hud:return', 'hud:approve'];
 
@@ -33,7 +33,7 @@ function saveSettings(file, settings) {
 
 // What the page draws from; position and visibility stay in the main process.
 const displaySettings = (s, approvals) => ({
-  size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers,
+  style: s.style, size: s.size, ringWidth: s.ringWidth, showsRings: s.showsRings, showsNumbers: s.showsNumbers,
   metrics: { ...s.metrics }, ...(approvals ? { approvals } : {}),
 });
 
@@ -58,7 +58,9 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
 
   const alive = () => win && !win.isDestroyed();
   const send = (channel, payload) => { try { if (alive()) win.webContents.send(channel, payload); } catch { /* renderer restarting */ } };
-  const layoutMessage = () => (layout ? { edge: layout.edge, strip: layout.strip, size: { width: layout.window.width, height: layout.window.height }, dragging: Boolean(drag) } : null);
+  const layoutMessage = () => (layout ? { mode: layout.mode || 'strip', edge: layout.edge, strip: layout.strip,
+    ...(layout.mode === 'notch' ? { notch: layout.notch } : {}),
+    size: { width: layout.window.width, height: layout.window.height }, dragging: Boolean(drag) } : null);
   const trusted = event => alive() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && isTrustedRenderer(event.senderFrame.url, hudEntry);
 
   function setIgnore(flag) {
@@ -79,7 +81,8 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   function place(force = false) {
     if (!alive()) return;
     const display = pickDisplay(screen.getAllDisplays(), screen.getPrimaryDisplay(), settings.displayId);
-    const next = layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset, strips });
+    const next = settings.style === 'notch' ? layoutNotch({ workArea: display.workArea })
+      : layoutHud({ workArea: display.workArea, edge: settings.edge, offset: settings.offset, strips });
     const moved = !layout || JSON.stringify(next.window) !== JSON.stringify(layout.window);
     const changed = moved || JSON.stringify(next) !== JSON.stringify(layout);
     layout = next;
@@ -114,7 +117,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   }
 
   function startDrag() {
-    if (drag || !alive() || !layout) return;
+    if (settings.style === 'notch' || drag || !alive() || !layout) return;
     const cursor = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const vertical = layout.edge === 'left' || layout.edge === 'right';
@@ -147,6 +150,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
     }
     if (p.resetPosition === true) Object.assign(merged, { displayId: DEFAULT_SETTINGS.displayId, edge: DEFAULT_SETTINGS.edge, offset: DEFAULT_SETTINGS.offset });
     settings = normalizeHudSettings(merged);
+    if (settings.style === 'notch' && drag) { clearInterval(drag.timer); drag = null; }
     saveSettings(settingsPath, settings);
     send('hud:settings', displaySettings(settings, approvals));
     place();
@@ -244,6 +248,7 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
   if (settings.visible) create();
 
   return {
+    getGames: () => [...settings.games],
     isVisible: () => settings.visible,
     show() {
       settings = { ...settings, visible: true };
