@@ -51,6 +51,11 @@ gameDetectorModule.createGameDetector = ({ onChange }) => {
   gameFeed = (gaming, exe = null) => onChange(gaming, gaming ? exe : null);
   return { start() {}, stop() {} };
 };
+// The tray menu is captured so the smoke can hide and show the HUD the way the user does.
+const { Menu } = require('electron');
+let trayMenu = [];
+const buildMenu = Menu.buildFromTemplate.bind(Menu);
+Menu.buildFromTemplate = template => { if (template.some(item => item.label === '显示 HUD')) trayMenu = template; return buildMenu(template); };
 const { shell } = require('electron');
 const opened = [];
 shell.openPath = async target => { opened.push(target); return ''; };
@@ -543,6 +548,41 @@ app.whenReady().then(async () => {
   await until(() => hudEval('document.querySelector("#notch").hidden && document.body.classList.contains("edge-top")'));
   await closeCard();
   checks.push('settings Style switches Strip and Notch both ways and the strip returns to its edge');
+  // Task 7, end to end through the main process: a real approval request while gaming.
+  await hudEval("hud.setSettings({ style: 'notch' })");
+  await until(() => hudEval('!document.querySelector("#notch").hidden'));
+  const endpoint = JSON.parse(fs.readFileSync(path.join(output, 'appdata', 'QuotaDeck', 'approval-endpoint.json'), 'utf8'));
+  gameFeed(true, 'deadlock.exe');
+  await until(() => !hudWindow.isVisible());
+  const http = require('node:http');
+  const pending = http.request({ host: '127.0.0.1', port: endpoint.port, path: '/approval', method: 'POST', headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' } });
+  pending.on('error', () => {});
+  pending.end(JSON.stringify({ vendor: 'claude', sessionId: 'game-approval', cwd: 'C:/work', tool: 'Bash', summary: 'npm test' }));
+  await sleep(1000);
+  assert.equal(hudWindow.isVisible(), false, 'an approval during a game does not show the HUD');
+  const leftAt = Date.now();
+  gameFeed(false);
+  await until(async () => hudWindow.isVisible() && /^Approve\?/.test(await hudEval('document.querySelector("#notch .wing-r")?.textContent || ""')));
+  assert.ok(Date.now() - leftAt < 2000, 'back within 2 s with the approval on the wing');
+  pending.destroy();
+  await until(() => hudEval('!/^Approve/.test(document.querySelector("#notch .wing-r")?.textContent || "")'));
+  checks.push('end to end: an approval during a game stays hidden and shows Approve? within 2 s after the game');
+  const showItem = trayMenu.find(item => item.label === '显示 HUD');
+  showItem.click({ checked: false });
+  await until(() => !hudWindow.isVisible());
+  gameFeed(true, 'cs2.exe');
+  gameFeed(false);
+  await sleep(600);
+  assert.equal(hudWindow.isVisible(), false, 'leaving a game does not show a HUD the user hid');
+  gameFeed(true, 'cs2.exe');
+  showItem.click({ checked: true });
+  await sleep(300);
+  assert.equal(hudWindow.isVisible(), false, 'show during a game waits for the game to end');
+  gameFeed(false);
+  await until(() => hudWindow.isVisible());
+  checks.push('a HUD hidden from the tray stays hidden across a game; showing it during a game waits for the game to end');
+  await hudEval("hud.setSettings({ style: 'strip' })");
+  await until(() => hudEval('document.querySelector("#notch").hidden && !document.querySelector("#strip").hidden'));
   // <<more checks>>
   assert.equal(endpointState(), endpointBefore, 'the real approval endpoint is untouched');
   assert.ok(fs.existsSync(path.join(output, 'appdata', 'QuotaDeck', 'approval-endpoint.json')), 'the smoke writes its own endpoint');
