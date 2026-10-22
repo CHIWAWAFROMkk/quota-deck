@@ -6,7 +6,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(process.env.QD_TEST_APP_ROOT || path.join(__dirname, '..'));
 const output = fs.mkdtempSync(path.join(__dirname, '../work/desktop-smoke-'));
+// The approval endpoint lives under appData and is deleted on quit: a running QuotaDeck must keep its own.
+const realEndpoint = path.join(app.getPath('appData'), 'QuotaDeck', 'approval-endpoint.json');
+const endpointState = () => { try { return fs.readFileSync(realEndpoint, 'utf8'); } catch { return null; } };
+const endpointBefore = endpointState();
 app.setPath('userData', path.join(output, 'profile'));
+app.setPath('appData', path.join(output, 'appdata'));
 const source = require(path.join(root, 'src/main/snapshot.cjs'));
 const oauth = require(path.join(root, 'src/main/claude-oauth.cjs'));
 const now = Date.now();
@@ -38,6 +43,13 @@ sessionWatcherModule.createSessionWatcher = ({ tracker, onChange }) => {
   // The real tracker, fed by hand: lets the smoke drive a whole turn through the main process.
   sessionFeed = (vendor, events) => { for (const event of events) tracker.ingest(vendor, event); onChange(tracker.snapshot(Date.now())); };
   return { start: async () => {}, stop() {}, tick: async () => {}, rescan: async () => {} };
+};
+// No real PowerShell probe: the smoke decides when a game starts and ends.
+const gameDetectorModule = require(path.join(root, 'src/main/game-detector.cjs'));
+let gameFeed = null;
+gameDetectorModule.createGameDetector = ({ onChange }) => {
+  gameFeed = (gaming, exe = null) => onChange(gaming, gaming ? exe : null);
+  return { start() {}, stop() {} };
 };
 const { shell } = require('electron');
 const opened = [];
@@ -424,6 +436,9 @@ app.whenReady().then(async () => {
   await hudEval(`document.querySelector('#strip').dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true, screenX: 10, screenY: 10, pointerId: 2 }))`);
   checks.push('a lost pointer capture or a fresh press ends a stuck drag');
   // <<more checks>>
+  assert.equal(endpointState(), endpointBefore, 'the real approval endpoint is untouched');
+  assert.ok(fs.existsSync(path.join(output, 'appdata', 'QuotaDeck', 'approval-endpoint.json')), 'the smoke writes its own endpoint');
+  checks.push('approval endpoint isolated: the real one under appData is untouched');
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify({ electron: process.versions.electron, checks }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, output, electron: process.versions.electron }));
   clearTimeout(watchdog);
