@@ -8,6 +8,7 @@ const { createApprovalServer } = require('./approval-server.cjs');
 const { nodePath } = require('./local-paths.cjs');
 const { buildHudItems, buildHudTokens } = require('./hud-view.cjs');
 const { createHud } = require('./hud-window.cjs');
+const { createGameDetector } = require('./game-detector.cjs');
 const { createTokenLedger } = require('./token-ledger.cjs');
 const { createStats } = require('./stats-window.cjs');
 const { createSessionTracker } = require('./session-tracker.cjs');
@@ -18,6 +19,7 @@ let tray = null;
 let refreshTimer = null;
 let refreshPending = null;
 let hud = null;
+let gameDetector = null;
 let tokenLedger = null;
 let stats = null;
 let lastTokens = null;
@@ -141,6 +143,8 @@ app.whenReady().then(() => {
     },
   });
   hud.pushApprovals?.(approvalConnectionState());
+  gameDetector = createGameDetector({ getGames: () => hud.getGames(), onChange: gaming => hud?.setGaming(gaming) });
+  gameDetector.start();
   sessionWatcher = createSessionWatcher({ tracker: sessionTracker, onChange: snapshot => hud?.pushSessions(snapshot) });
   sessionWatcher.start().catch(() => {});
   createTray();
@@ -152,6 +156,7 @@ app.on('before-quit', () => {
   app.isQuiting = true;
   if (refreshTimer) clearInterval(refreshTimer);
   sessionWatcher?.stop();
+  gameDetector?.stop();
   hud?.destroy();
   stats?.destroy();
   const server = approvalServer;

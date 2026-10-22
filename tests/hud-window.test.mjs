@@ -30,6 +30,9 @@ function fakeElectron() {
       this.loads = 0;
       this.bounds = { x: 0, y: 0, width: options.width, height: options.height };
       this.destroyed = false;
+      this.visible = false;
+      this.shows = 0;
+      this.focuses = 0;
       this.sent = [];
       this.webContents = Object.assign(new Emitter(), {
         mainFrame: { url: pathToFileURL(path.resolve('src/renderer/hud.html')).href },
@@ -42,13 +45,13 @@ function fakeElectron() {
     setAlwaysOnTop() {}
     setIgnoreMouseEvents(flag) { this.ignore = flag; }
     setFocusable(flag) { this.focusable = flag; }
-    focus() {}
-    showInactive() {}
-    hide() {}
+    focus() { this.focuses++; }
+    showInactive() { this.visible = true; this.shows++; }
+    hide() { this.visible = false; }
     isDestroyed() { return this.destroyed; }
     setBounds(bounds) { this.bounds = { ...bounds }; this.boundsSet++; }
     getBounds() { return { ...this.bounds }; }
-    isVisible() { return true; }
+    isVisible() { return this.visible; }
     loadFile() { this.loads++; return Promise.resolve(); }
     destroy() { this.destroyed = true; }
     last(channel) { return this.sent.filter(([name]) => name === channel).at(-1)?.[1]; }
@@ -329,5 +332,115 @@ test('games cannot be changed through the settings channel', async () => {
     fake.ipc.handle['hud:settings'](event, { games: ['x.exe'], style: 'notch' });
     assert.deepEqual(hud.getGames(), defaults);
     assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).games, defaults);
+  } finally { hud.destroy(); }
+});
+
+test('gaming hides the HUD and leaving shows it again', async () => {
+  const { fake, hud, win, event } = await setup();
+  try {
+    assert.equal(fake.ipc.handle['hud:initial'](event).gaming, false);
+    fake.ipc.on['hud:card'](event, true);
+    hud.setGaming(true);
+    assert.equal(win.isVisible(), false);
+    assert.equal(win.last('hud:gaming'), true);
+    assert.equal(win.focusable, false);
+    assert.equal(fake.ipc.handle['hud:initial'](event).gaming, true);
+    const focuses = win.focuses;
+    fake.ipc.on['hud:card'](event, true);
+    assert.equal(win.focuses, focuses, 'late card event cannot steal game focus');
+    hud.setGaming(false);
+    assert.equal(win.isVisible(), true);
+    assert.equal(win.last('hud:gaming'), false);
+    const shows = win.shows;
+    hud.setGaming(false);
+    assert.equal(win.shows, shows, 'unchanged game state does not reveal twice');
+  } finally { hud.destroy(); }
+});
+
+test('leaving a game does not show a HUD the user hid', async () => {
+  const { hud, win } = await setup();
+  try {
+    hud.hide(); hud.setGaming(true); hud.setGaming(false);
+    assert.equal(win.isVisible(), false);
+    assert.equal(hud.isVisible(), false);
+    hud.show(); hud.setGaming(true); hud.hide(); hud.setGaming(false);
+    assert.equal(win.isVisible(), false, 'hiding during the game is also respected');
+  } finally { hud.destroy(); }
+});
+
+test('show during a game waits for the game to end', async () => {
+  const { hud, win } = await setup();
+  try {
+    hud.hide(); hud.setGaming(true); hud.show();
+    assert.equal(hud.isVisible(), true);
+    assert.equal(win.isVisible(), false);
+    hud.setGaming(false);
+    assert.equal(win.isVisible(), true);
+  } finally { hud.destroy(); }
+});
+
+test('alerts pushed while gaming are delivered when the game ends', async () => {
+  const { fake, hud, win, event } = await setup();
+  try {
+    hud.setGaming(true);
+    const snapshot = { vendors: { claude: { phase: 'waiting', running: 0 } }, alerts: [{ id: 'approval:example', vendor: 'claude', kind: 'approval', at: 123 }] };
+    hud.pushSessions(snapshot);
+    assert.equal(win.isVisible(), false);
+    hud.setGaming(false);
+    assert.deepEqual(win.last('hud:sessions'), snapshot);
+    assert.deepEqual(fake.ipc.handle['hud:initial'](event).sessions, snapshot);
+    assert.equal(win.isVisible(), true);
+  } finally { hud.destroy(); }
+});
+
+test('gaming does not change the saved visible flag', async () => {
+  const { hud, file } = await setup();
+  try {
+    for (const visible of [true, false]) {
+      if (visible) hud.show(); else hud.hide();
+      const before = await readFile(file, 'utf8');
+      hud.setGaming(true);
+      assert.equal(await readFile(file, 'utf8'), before);
+      assert.equal(hud.isVisible(), visible);
+      hud.setGaming(false);
+      assert.equal(await readFile(file, 'utf8'), before);
+    }
+  } finally { hud.destroy(); }
+});
+
+test('gaming suspends pointer polling, cancels a drag and survives renderer reloads', async () => {
+  const { fake, hud, win, event } = await setup();
+  let reads = 0;
+  const getCursor = fake.electron.screen.getCursorScreenPoint;
+  fake.electron.screen.getCursorScreenPoint = () => { reads++; return getCursor(); };
+  try {
+    fake.ipc.on['hud:drag'](event, 'start');
+    hud.setGaming(true);
+    assert.equal(win.last('hud:layout').dragging, false);
+    const before = reads;
+    fake.ipc.on['hud:drag'](event, 'start');
+    await sleep(100);
+    assert.equal(reads, before);
+    hud.reload(); win.webContents.emit('did-finish-load');
+    assert.equal(win.isVisible(), false);
+    assert.equal(win.last('hud:gaming'), true);
+    hud.setGaming(false);
+    await sleep(100);
+    assert.ok(reads > before, 'poll resumes after gaming');
+  } finally { hud.destroy(); }
+});
+
+test('show during gaming defers creating a missing HUD until gaming ends', async () => {
+  const { fake, hud, win } = await setup();
+  try {
+    win.destroy(); win.emit('closed');
+    hud.setGaming(true); hud.show();
+    assert.equal(fake.windows.length, 1);
+    hud.setGaming(false);
+    assert.equal(fake.windows.length, 2);
+    const replacement = fake.windows[1];
+    replacement.webContents.emit('did-finish-load');
+    assert.equal(replacement.isVisible(), true);
+    assert.equal(replacement.last('hud:gaming'), false);
   } finally { hud.destroy(); }
 });
