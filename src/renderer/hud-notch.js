@@ -17,6 +17,9 @@
     let settings = null;
     let centre = null;
     let hovered = false;
+    let inside = false;
+    // While a card hangs below, the notch keeps its shape so the card does not jump.
+    let held = false;
     let showTimer = null;
     let hideTimer = null;
     let seen = null;
@@ -110,15 +113,20 @@
     }
 
     root.addEventListener('mouseover', () => {
-      if (!centre) return;
+      inside = true;
+      if (!centre || held) return;
       clearTimeout(hideTimer);
       if (!hovered && !showTimer) showTimer = setTimeout(() => { showTimer = null; hovered = true; layout(); }, SHOW_MS);
     });
+    function scheduleHide() {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => { if (!held && !inside) { hovered = false; layout(); } }, HIDE_MS);
+    }
     root.addEventListener('mouseleave', () => {
+      inside = false;
       clearTimeout(showTimer);
       showTimer = null;
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => { hovered = false; layout(); }, HIDE_MS);
+      if (!held) scheduleHide();
     });
     root.addEventListener('click', event => {
       const current = view();
@@ -152,6 +160,21 @@
         return Boolean(active);
       },
       pulse,
+      // Flash every vendor that has alerts once more, e.g. when a game ends.
+      replay() {
+        const alerts = Array.isArray(sessions?.alerts) ? sessions.alerts : [];
+        for (const vendor of new Set(alerts.map(alert => alert?.vendor))) {
+          const top = pickWing(alerts.filter(alert => alert?.vendor === vendor));
+          if (top) pulse(top.vendor, top.kind);
+        }
+      },
+      hold(on) {
+        if (on === held) return;
+        held = on;
+        clearTimeout(showTimer);
+        showTimer = null;
+        if (!held) scheduleHide();
+      },
       isOpen: () => view() === 'rings',
       // Final box after any running animation: the card hangs below it.
       rect: () => ({ ...box, bottom: box.top + box.height, right: box.left + box.width }),

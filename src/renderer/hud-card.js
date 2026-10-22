@@ -7,7 +7,7 @@
   const MARGIN = 4;
   const CLOSE_MS = 100;
 
-  function create({ root, strip, getItem, getTokens, getMetric, setMetric, settingsView = null, onOpenStats, onChange, getAlerts = () => [], onDismiss = () => {}, onReturn = async () => ({}) }) {
+  function create({ root, strip, getNotch = () => null, getItem, getTokens, getMetric, setMetric, settingsView = null, onOpenStats, onChange, getAlerts = () => [], onDismiss = () => {}, onReturn = async () => ({}) }) {
     let openId = null;
     let view = 'detail';
     let closeTimer = null;
@@ -97,10 +97,12 @@
 
     // Beside the strip on its inner side, 6px away, centred on the clicked mark and kept on screen.
     function position(animate) {
-      const mark = strip.markRect(openId);
+      const notch = getNotch();
+      const mark = notch ? notch.markRect(openId) : strip.markRect(openId);
       if (!mark) return;
-      const s = document.querySelector('#strip').getBoundingClientRect();
-      const edge = edgeNow();
+      // Under the notch the card hangs from the black block exactly as from a top-docked strip.
+      const s = notch ? notch.rect() : document.querySelector('#strip').getBoundingClientRect();
+      const edge = notch ? 'top' : edgeNow();
       // Cap the height to the room on the strip's inner side; the card scrolls instead of being clipped.
       const H = document.documentElement.clientHeight;
       const room = edge === 'top' ? H - s.bottom - GAP - MARGIN : edge === 'bottom' ? s.top - GAP - MARGIN : H - 2 * MARGIN;
@@ -113,7 +115,7 @@
       let y;
       if (edge === 'left') { x = s.right + GAP; y = clampY(mark.top + mark.height / 2 - h / 2); }
       else if (edge === 'right') { x = s.left - GAP - w; y = clampY(mark.top + mark.height / 2 - h / 2); }
-      else if (edge === 'top') { y = s.bottom + GAP; x = clampX(mark.left + mark.width / 2 - w / 2); }
+      else if (edge === 'top') { y = s.bottom + GAP; x = clampX((notch ? s.left + s.width / 2 : mark.left + mark.width / 2) - w / 2); }
       else { y = s.top - GAP - h; x = clampX(mark.left + mark.width / 2 - w / 2); }
       root.style.left = `${Math.round(x)}px`;
       root.style.top = `${Math.round(y)}px`;
@@ -212,9 +214,10 @@
       window.hud.card(true);
     }
 
-    function close() {
+    // keepAlerts: closed by something other than the user (a game), so nothing counts as seen.
+    function close({ keepAlerts = false } = {}) {
       if (!openId) return;
-      if (openedAlertIds.size) onDismiss([...openedAlertIds]);
+      if (openedAlertIds.size && !keepAlerts) onDismiss([...openedAlertIds]);
       openedAlertIds = new Set();
       openId = null;
       view = 'detail';

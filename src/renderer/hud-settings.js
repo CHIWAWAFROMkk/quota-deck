@@ -41,6 +41,20 @@
       return button;
     }
 
+    // Strip or Notch; older main processes send no style and mean the strip.
+    const styleOf = () => (getSettings()?.style === 'notch' ? 'notch' : 'strip');
+    const styleBox = el('span', { class: 'picker set-style' }, [['strip', 'Strip'], ['notch', 'Notch']].map(([value, label]) => {
+      const button = el('button', { class: 'pick wide', type: 'button', 'data-style': value, text: label });
+      button.addEventListener('click', () => { onChange({ style: value }); paintStyle(value); });
+      return button;
+    }));
+    let numbersRow = null;
+    function paintStyle(value = styleOf()) {
+      for (const button of styleBox.children) button.classList.toggle('on', button.dataset.style === value);
+      // Numbers never show in the notch, so the switch would do nothing there.
+      if (numbersRow) numbersRow.hidden = value === 'notch';
+    }
+
     const reset = el('button', { class: 'btn', type: 'button', text: 'Reset' });
     reset.addEventListener('click', () => onChange({ resetPosition: true }));
     const backButton = el('button', { class: 'back', type: 'button', 'data-act': 'back', 'aria-label': 'Back', title: 'Back' }, [icon('back')]);
@@ -83,10 +97,11 @@
       el('section', { class: 'sec' }, [el('header', { class: 'head' }, [backButton, el('h2', { text: 'Settings' })])]),
       el('section', { class: 'sec set' }, [
         el('h3', { text: 'Display' }),
+        row('style', 'Style', styleBox),
         row('size', 'Size', slider('size', 16, 40, 1)),
         row('showsRings', 'Show rings', toggle('showsRings')),
         ringRow,
-        row('showsNumbers', 'Show numbers', toggle('showsNumbers')),
+        (numbersRow = row('showsNumbers', 'Show numbers', toggle('showsNumbers'))),
         row('position', 'Position', reset),
       ]),
       el('section', { class: 'sec set' }, [
@@ -98,7 +113,8 @@
         status,
       ]),
     ];
-    nodes.update = () => { renderClaude(); renderApprovals(); };
+    paintStyle();
+    nodes.update = () => { renderClaude(); renderApprovals(); paintStyle(); };
     return nodes;
   }
 

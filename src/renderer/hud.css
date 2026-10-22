@@ -222,3 +222,4 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .wing-name { font-size: 13px; font-weight: 600; }
 .notch-wings .alert-text { font-size: 13px; }
 .notch-rings { justify-content: center; }
+.pick.wide { width: auto; padding: 0 8px; font-size: 12px; }

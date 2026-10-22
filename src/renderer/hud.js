@@ -13,6 +13,7 @@
   let lastHits = '';
   // Notch and strip are alternatives; the main process says which through layout.mode.
   let notchMode = false;
+  let notch = null;
 
   // Tell the main process where the visible parts are; it turns click-through off only over them.
   function reportHits() {
@@ -41,6 +42,7 @@
   const card = window.HudCard.create({
     root: cardNode,
     strip,
+    getNotch: () => (notchMode ? notch : null),
     getItem: id => items.find(item => item.id === id),
     getTokens: () => tokens,
     getMetric: id => settings?.metrics?.[id] || 'quota',
@@ -58,16 +60,16 @@
       onAction: name => window.hud.action(name),
     }),
     onOpenStats: () => { window.hud.openStats().catch(() => {}); },
-    onChange: scheduleHits,
+    onChange: () => { notch?.hold(card.isOpen()); scheduleHits(); },
     getAlerts: vendor => (Array.isArray(sessions?.alerts) ? sessions.alerts : []).filter(alert => alert && alert.vendor === vendor),
     onDismiss: ids => window.hud.dismiss(ids),
     onReturn: id => window.hud.returnTo(id),
   });
 
-  const notch = window.HudNotch.create({
+  notch = window.HudNotch.create({
     root: document.querySelector('#notch'),
     onClick: id => card.toggle(id),
-    onChange: scheduleHits,
+    onChange: () => { card.reposition(); scheduleHits(); },
   });
 
   new ResizeObserver(scheduleHits).observe(stripNode);
@@ -79,11 +81,9 @@
     document.body.classList.add(`edge-${layout.edge}`);
     document.body.classList.toggle('dragging', layout.dragging);
     if (layout.dragging) { strip.hidePill(true); card.close(); }
-    const wasNotch = notchMode;
     notchMode = notch.place(layout);
     stripNode.hidden = notchMode;
     document.body.classList.toggle('mode-notch', notchMode);
-    if (notchMode !== wasNotch) card.close();
     // A notch layout carries no strip box; the strip keeps its last place until it comes back.
     if (layout.strip) strip.place(layout);
     if (notchMode) strip.hidePill(true); else strip.renderAlerts();
@@ -96,6 +96,8 @@
   window.hud.onSettings(next => { settings = withDefaults(next); strip.setSettings(settings); notch.setSettings(settings); card.refresh(); scheduleHits(); });
   window.hud.onLayout(applyLayout);
   window.hud.onSessions(next => { sessions = next; strip.setSessions(next); notch.setSessions(next); card.refresh(); scheduleHits(); });
+  // A game hides the whole window; nothing stays open behind it, and the glow flashes again afterwards.
+  window.hud.onGaming?.(gaming => { if (gaming) card.close({ keepAlerts: true }); else notch.replay(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') card.close(); });
   window.addEventListener('blur', () => card.close());
 

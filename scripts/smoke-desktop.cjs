@@ -332,7 +332,7 @@ app.whenReady().then(async () => {
   await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
   await hudEval('document.querySelector("#card [data-act=settings]").click()');
   await until(() => hudEval('document.querySelector("#card h2")?.textContent === "Settings"'));
-  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .set-row > span:first-child")].map(n => n.textContent)'), ['Size', 'Show rings', 'Ring thickness', 'Show numbers', 'Position', 'Claude', 'Approvals', 'WorkBuddy', 'DeepSeek']);
+  assert.deepEqual(await hudEval('[...document.querySelectorAll("#card .set-row > span:first-child")].map(n => n.textContent)'), ['Style', 'Size', 'Show rings', 'Ring thickness', 'Show numbers', 'Position', 'Claude', 'Approvals', 'WorkBuddy', 'DeepSeek']);
   await sleep(450);
   await shot('hud-settings');
   await hudEval(`(() => { const r = document.querySelector('#card input[data-key=size]'); r.value = '30'; r.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -479,8 +479,70 @@ app.whenReady().then(async () => {
   pushSessions(snapshotOf('idle', 'idle'));
   await until(() => notchView('collapsed'));
   checks.push('notch hover: after 400ms the wings give way to five rings without numbers, back on leave');
-  await hudEval("hud.setSettings({ style: 'strip' })");
+  // Task 6: the card hangs 6px below the black block, centred, whether opened from a ring or the wing.
+  const notchHover = async () => { await hudEval('document.querySelector("#notch").dispatchEvent(new MouseEvent("mouseover", { bubbles: true }))'); await until(() => notchView('rings')); };
+  const notchLeave = () => hudEval('document.querySelector("#notch").dispatchEvent(new MouseEvent("mouseleave"))');
+  const cardUnder = () => hudEval(`(() => { const c = document.querySelector('#card').getBoundingClientRect(); const n = document.querySelector('#notch');
+    return { gap: Math.round(c.top - (n.offsetTop + n.offsetHeight)), centred: Math.abs(c.left + c.width / 2 - (n.offsetLeft + n.offsetWidth / 2)) <= 1 }; })()`);
+  await notchHover();
+  await hudEval('document.querySelector("#notch .notch-rings [data-id=claude]").click()');
+  await until(() => hudEval('document.querySelector("#card").classList.contains("shown") && document.querySelectorAll("#card .row").length === 3'));
+  await notchLeave();
+  await sleep(450);
+  assert.equal(await notchView('rings'), true, 'the notch keeps its shape while the card is open');
+  assert.deepEqual(await cardUnder(), { gap: 6, centred: true });
+  await shot('hud-notch-card');
+  await closeCard();
+  await until(() => notchView('collapsed'));
+  const gameTurn = '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+  const turnAt = Date.now();
+  sessionFeed('claude', [
+    { kind: 'meta', at: turnAt, sessionId: gameTurn, source: 'claude-vscode', cwd: 'C:/work' },
+    { kind: 'prompt', at: turnAt, sessionId: gameTurn, text: 'Tidy the notch' },
+    { kind: 'turn-end', at: turnAt + 1, sessionId: gameTurn, text: 'Tidied.', error: false, durationMs: null, model: 'claude-opus-5-5' },
+  ]);
+  await until(() => hudEval('document.querySelector("#notch .wing-r")?.textContent === "New reply"'));
+  await hudEval('document.querySelector("#notch .notch-wings").click()');
+  await until(() => hudEval(`${blocks}.length === 1`));
+  await sleep(450);
+  assert.deepEqual(await cardUnder(), { gap: 6, centred: true });
+  checks.push('notch card: 6px below the block and centred, from a ring and from the wing; the notch holds its shape meanwhile');
+  // A game closes the card; when it ends the alerting vendor flashes again.
+  gameFeed(true, 'cs2.exe');
+  await until(() => hudEval('document.querySelector("#card").hidden'));
+  await until(() => !hudWindow.isVisible());
+  const gameTurn2 = '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6e';
+  sessionFeed('claude', [
+    { kind: 'meta', at: Date.now(), sessionId: gameTurn2, source: 'claude-vscode', cwd: 'C:/work' },
+    { kind: 'prompt', at: Date.now(), sessionId: gameTurn2, text: 'Finish while I play' },
+    { kind: 'turn-end', at: Date.now() + 1, sessionId: gameTurn2, text: 'Finished.', error: false, durationMs: null, model: 'claude-opus-5-5' },
+  ]);
+  await sleep(300);
+  assert.equal(hudWindow.isVisible(), false, 'an alert during a game stays hidden');
+  await hudEval('document.querySelectorAll("#notch .notch-seg").forEach(s => s.classList.remove("pulse"))');
+  gameFeed(false);
+  await until(async () => hudWindow.isVisible() && await hudEval('document.querySelector("#notch .notch-seg[data-vendor=claude]").classList.contains("pulse") && /^New reply/.test(document.querySelector("#notch .wing-r").textContent)'));
+  checks.push('gaming closes the card and hides the HUD; a turn finished meanwhile shows with a flash when the game ends');
+  await hudEval('document.querySelector("#notch .notch-wings").click()');
+  await until(() => hudEval(`${blocks}.length === 1`));
+  await closeCard();
+  await until(() => notchView('collapsed'));
+  // The Style switch on the settings page, both ways; the strip comes back to the edge it had.
+  await notchHover();
+  await hudEval('document.querySelector("#notch .notch-rings [data-id=claude]").click()');
+  await until(() => hudEval('document.querySelector("#card").classList.contains("shown")'));
+  await hudEval('document.querySelector("#card [data-act=settings]").click()');
+  await until(() => hudEval('document.querySelector("#card h2")?.textContent === "Settings"'));
+  assert.equal(await hudEval('document.querySelector("#card [data-style=notch]").classList.contains("on") && document.querySelector("#card [data-row=showsNumbers]").hidden'), true);
+  await hudEval('document.querySelector("#card [data-style=strip]").click()');
   await until(() => hudEval('document.querySelector("#notch").hidden && !document.querySelector("#strip").hidden && document.body.classList.contains("edge-top")'));
+  assert.equal(await hudEval('document.querySelector("#card h2")?.textContent === "Settings" && !document.querySelector("#card [data-row=showsNumbers]").hidden'), true, 'the settings page stays open across the switch');
+  await hudEval('document.querySelector("#card [data-style=notch]").click()');
+  await until(() => hudEval('!document.querySelector("#notch").hidden && document.querySelector("#strip").hidden'));
+  await hudEval('document.querySelector("#card [data-style=strip]").click()');
+  await until(() => hudEval('document.querySelector("#notch").hidden && document.body.classList.contains("edge-top")'));
+  await closeCard();
+  checks.push('settings Style switches Strip and Notch both ways and the strip returns to its edge');
   // <<more checks>>
   assert.equal(endpointState(), endpointBefore, 'the real approval endpoint is untouched');
   assert.ok(fs.existsSync(path.join(output, 'appdata', 'QuotaDeck', 'approval-endpoint.json')), 'the smoke writes its own endpoint');
