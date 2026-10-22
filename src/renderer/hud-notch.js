@@ -168,6 +168,15 @@
           if (top) pulse(top.vendor, top.kind);
         }
       },
+      // The pointer cannot leave a hidden window, so a hover in progress is dropped.
+      rest() {
+        clearTimeout(showTimer);
+        clearTimeout(hideTimer);
+        showTimer = null;
+        hovered = false;
+        inside = false;
+        layout();
+      },
       hold(on) {
         if (on === held) return;
         held = on;

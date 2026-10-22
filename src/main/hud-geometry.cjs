@@ -24,7 +24,7 @@ function normalizeHudSettings(raw) {
     visible: typeof r.visible === 'boolean' ? r.visible : DEFAULT_SETTINGS.visible,
     style: isValidSetting('style', r.style) ? r.style : DEFAULT_SETTINGS.style,
     games: Array.isArray(r.games)
-      ? [...new Set(r.games.filter(v => typeof v === 'string' && /^[\w .()-]{1,60}\.exe$/i.test(v)).map(v => v.toLowerCase()))].slice(0, 40)
+      ? [...new Set(r.games.filter(v => typeof v === 'string' && /^[^\\/:*?"<>|\x00-\x1f]{1,60}\.exe$/i.test(v)).map(v => v.toLowerCase()))].slice(0, 40)
       : [...DEFAULT_GAMES],
     size: Number.isInteger(r.size) && r.size >= 16 && r.size <= 40 ? r.size : DEFAULT_SETTINGS.size,
     ringWidth: Number.isFinite(r.ringWidth) && r.ringWidth >= 1 && r.ringWidth <= 4 ? Math.round(r.ringWidth * 2) / 2 : DEFAULT_SETTINGS.ringWidth,

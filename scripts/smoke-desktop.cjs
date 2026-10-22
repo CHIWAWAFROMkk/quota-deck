@@ -567,6 +567,8 @@ app.whenReady().then(async () => {
   pending.destroy();
   await until(() => hudEval('!/^Approve/.test(document.querySelector("#notch .wing-r")?.textContent || "")'));
   checks.push('end to end: an approval during a game stays hidden and shows Approve? within 2 s after the game');
+  await until(() => lastHits.some(r => r.width === 200 && r.height === 30));
+  await sleep(500);
   const showItem = trayMenu.find(item => item.label === '显示 HUD');
   showItem.click({ checked: false });
   await until(() => !hudWindow.isVisible());
@@ -578,8 +580,11 @@ app.whenReady().then(async () => {
   showItem.click({ checked: true });
   await sleep(300);
   assert.equal(hudWindow.isVisible(), false, 'show during a game waits for the game to end');
+  // The main process forgets the clickable areas when a game starts; the page must report them again.
+  lastHits = [];
   gameFeed(false);
   await until(() => hudWindow.isVisible());
+  await until(() => lastHits.some(r => r.width === 200 && r.height === 30));
   checks.push('a HUD hidden from the tray stays hidden across a game; showing it during a game waits for the game to end');
   await hudEval("hud.setSettings({ style: 'strip' })");
   await until(() => hudEval('document.querySelector("#notch").hidden && !document.querySelector("#strip").hidden'));

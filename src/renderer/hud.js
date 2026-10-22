@@ -19,8 +19,10 @@
   function reportHits() {
     // Layout boxes, not getBoundingClientRect: the card is still scaled down while it opens,
     // and clicks on its final area must not fall through to the window below.
+    // The notch reports where its resize is heading, so freshly grown wings are clickable at once.
     const rects = [...document.querySelectorAll('.hit')].filter(node => !node.hidden)
-      .map(node => ({ x: node.offsetLeft, y: node.offsetTop, width: node.offsetWidth, height: node.offsetHeight }));
+      .map(node => (node.id === 'notch' && notch ? (({ left, top, width, height }) => ({ x: left, y: top, width, height }))(notch.rect())
+        : { x: node.offsetLeft, y: node.offsetTop, width: node.offsetWidth, height: node.offsetHeight }));
     const key = JSON.stringify(rects);
     if (key === lastHits) return;
     lastHits = key;
@@ -97,7 +99,13 @@
   window.hud.onLayout(applyLayout);
   window.hud.onSessions(next => { sessions = next; strip.setSessions(next); notch.setSessions(next); card.refresh(); scheduleHits(); });
   // A game hides the whole window; nothing stays open behind it, and the glow flashes again afterwards.
-  window.hud.onGaming?.(gaming => { if (gaming) card.close({ keepAlerts: true }); else notch.replay(); });
+  // The main process forgets the clickable areas while gaming, so they are reported again afterwards.
+  window.hud.onGaming?.(gaming => {
+    if (gaming) { card.close({ keepAlerts: true }); notch.rest(); return; }
+    lastHits = '';
+    scheduleHits();
+    notch.replay();
+  });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') card.close(); });
   window.addEventListener('blur', () => card.close());
 

@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+# Without a console this can throw; the JSON lines are ASCII-safe paths either way.
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
 
 # Only native geometry, process identity and shell notification state are collected.
 Add-Type -TypeDefinition @'
@@ -29,9 +30,36 @@ namespace QuotaDeck {
         public static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
         [DllImport("user32.dll")]
         public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsZoomed(IntPtr window);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, System.Text.StringBuilder name, ref uint size);
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CloseHandle(IntPtr handle);
+
+        // PROCESS_QUERY_LIMITED_INFORMATION also works for elevated processes, unlike Process.Path.
+        public static string ProcessPath(uint processId) {
+            if (processId == 0) return "";
+            IntPtr process = OpenProcess(0x1000, false, processId);
+            if (process == IntPtr.Zero) return "";
+            try {
+                var name = new System.Text.StringBuilder(1024);
+                uint size = (uint)name.Capacity;
+                return QueryFullProcessImageNameW(process, 0, name, ref size) ? name.ToString() : "";
+            } finally {
+                CloseHandle(process);
+            }
+        }
 
         public static bool CoversMonitor(IntPtr window) {
-            if (window == IntPtr.Zero) return false;
+            // A maximised window spills a few pixels past the screen; with an auto-hidden taskbar it would
+            // look fullscreen. Games and fullscreen video are never maximised windows.
+            if (window == IntPtr.Zero || IsZoomed(window)) return false;
             // Keep the window and monitor rectangles in physical pixels on mixed-DPI displays.
             IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
             try {
@@ -59,18 +87,21 @@ while ($true) {
     [uint32]$foregroundProcessId = 0
     [void][QuotaDeck.GameProbe]::GetWindowThreadProcessId($window, [ref]$foregroundProcessId)
     $exe = ''
-    $executablePath = ''
-    $foregroundProcess = $null
-    try {
-        if ($foregroundProcessId -ne 0) {
-            $foregroundProcess = Get-Process -Id $foregroundProcessId -ErrorAction Stop
-            $exe = $foregroundProcess.ProcessName + '.exe'
-            $executablePath = [string]$foregroundProcess.Path
+    $executablePath = [QuotaDeck.GameProbe]::ProcessPath($foregroundProcessId)
+    if ($executablePath) {
+        $exe = [System.IO.Path]::GetFileName($executablePath)
+    } else {
+        $foregroundProcess = $null
+        try {
+            if ($foregroundProcessId -ne 0) {
+                $foregroundProcess = Get-Process -Id $foregroundProcessId -ErrorAction Stop
+                $exe = $foregroundProcess.ProcessName + '.exe'
+            }
+        } catch {
+            # A process may exit or deny access between the native query and this read.
+        } finally {
+            if ($null -ne $foregroundProcess) { $foregroundProcess.Dispose() }
         }
-    } catch {
-        # A process may exit or deny access between the native query and this read.
-    } finally {
-        if ($null -ne $foregroundProcess) { $foregroundProcess.Dispose() }
     }
     $fact = [ordered]@{
         notification = $notification

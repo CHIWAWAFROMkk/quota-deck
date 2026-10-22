@@ -121,6 +121,8 @@ test('games list is validated and kept across saves', () => {
   assert.deepEqual(normalized.games, ['cs2.exe', 'x.exe']);
   assert.deepEqual(normalizeHudSettings(JSON.parse(JSON.stringify(normalized))).games, ['cs2.exe', 'x.exe']);
   assert.deepEqual(normalizeHudSettings({ games: [] }).games, []);
+  // Any legal file name counts, Chinese and '+' included; path separators and reserved characters do not.
+  assert.deepEqual(normalizeHudSettings({ games: ['原神.exe', 'Notepad++.exe', 'a\\b.exe', 'a:b.exe', 'a*b.exe', 'a\nb.exe', '.exe'] }).games, ['原神.exe', 'notepad++.exe']);
   assert.equal(normalizeHudSettings({ games: Array.from({ length: 45 }, (_, i) => `game${i}.exe`) }).games.length, 40);
 });
 
