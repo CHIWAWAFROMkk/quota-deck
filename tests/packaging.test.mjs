@@ -192,7 +192,8 @@ function isolatedInstaller(dir) {
 test('native Windows shortcuts support isolated install, upgrade and rollback with complex paths', { skip: !supported }, () => {
   const dir = fixture();
   const script = isolatedInstaller(dir);
-  const installations = ["旧版 app's", "新版 app's"];
+  // Thai is outside every Chinese and Western ANSI code page, so this exercises the Unicode path everywhere.
+  const installations = ["旧版 app's ทดสอบ", "新版 app's"];
   for (const name of installations) {
     fs.mkdirSync(path.join(dir, name));
     for (const file of ['QuotaDeck.exe', 'watch-agents.ps1']) fs.writeFileSync(path.join(dir, name, file), 'fixture, never executed');
@@ -201,7 +202,10 @@ test('native Windows shortcuts support isolated install, upgrade and rollback wi
   const literal = value => `'${value.replaceAll("'", "''")}'`;
   const inspect = path.join(dir, 'scripts/inspect.ps1');
   // PowerShell writes stdout in the system code page (GBK on Chinese Windows); force UTF-8 so Node reads paths intact.
-  fs.writeFileSync(inspect, `[Console]::OutputEncoding = [Text.Encoding]::UTF8\n$shell = New-Object -ComObject WScript.Shell\n$s = $shell.CreateShortcut(${literal(shortcut)})\n@{ target=$s.TargetPath; directory=$s.WorkingDirectory } | ConvertTo-Json`);
+  // Read back through the installer's own Unicode reader: WScript.Shell would mangle the
+  // Chinese folder names on a non-Chinese system just as it fails to write them.
+  const reader = /# <unicode-shortcut>([\s\S]*?)# <\/unicode-shortcut>/.exec(fs.readFileSync(path.join(root, 'scripts/install-shortcuts.ps1'), 'utf8'))[1];
+  fs.writeFileSync(inspect, `[Console]::OutputEncoding = [Text.Encoding]::UTF8\n${reader}\nAdd-Type -TypeDefinition $unicodeShortcutSource -Language CSharp\n$s = [QuotaDeck.Shortcut]::Open(${literal(shortcut)})\n@{ target=$s.TargetPath; directory=$s.WorkingDirectory } | ConvertTo-Json`);
   const readShortcut = () => {
     const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', inspect], { encoding: 'utf8', timeout: 10000 });
     assert.equal(result.status, 0, result.stderr);

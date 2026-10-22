@@ -17,6 +17,76 @@ if (-not (Test-Path -LiteralPath $watcherScript -PathType Leaf)) {
 }
 
 $shell = New-Object -ComObject WScript.Shell
+# WScript.Shell passes shortcut paths through the ANSI code page, so a folder name outside it
+# (Chinese on an English system) fails with "Value does not fall within the expected range".
+# The same CreateShortcut/Save shape is kept, backed by the Unicode IShellLinkW interface.
+# <unicode-shortcut>
+$unicodeShortcutSource = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+namespace QuotaDeck {
+  [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLinkObject {}
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+  interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int size, IntPtr data, uint flags);
+    void GetIDList(out IntPtr list);
+    void SetIDList(IntPtr list);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder name, int size);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder dir, int size);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int size);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+    void GetHotkey(out short key);
+    void SetHotkey(short key);
+    void GetShowCmd(out int cmd);
+    void SetShowCmd(int cmd);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, out int index);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path, int index);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path, uint reserved);
+    void Resolve(IntPtr window, uint flags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+  }
+  public class Shortcut {
+    public string Destination = "", TargetPath = "", Arguments = "", WorkingDirectory = "", IconLocation = "", Description = "";
+    public static Shortcut Open(string destination) {
+      var shortcut = new Shortcut { Destination = destination };
+      if (!System.IO.File.Exists(destination)) return shortcut;
+      var link = (IShellLinkW)new ShellLinkObject();
+      ((IPersistFile)link).Load(destination, 0);
+      var text = new StringBuilder(32768);
+      link.GetPath(text, text.Capacity, IntPtr.Zero, 0); shortcut.TargetPath = text.ToString();
+      text.Clear(); link.GetArguments(text, text.Capacity); shortcut.Arguments = text.ToString();
+      text.Clear(); link.GetWorkingDirectory(text, text.Capacity); shortcut.WorkingDirectory = text.ToString();
+      text.Clear(); link.GetDescription(text, text.Capacity); shortcut.Description = text.ToString();
+      int icon; text.Clear(); link.GetIconLocation(text, text.Capacity, out icon);
+      shortcut.IconLocation = text.Length > 0 ? text + "," + icon : "";
+      return shortcut;
+    }
+    public void Save() {
+      var link = (IShellLinkW)new ShellLinkObject();
+      link.SetPath(TargetPath);
+      link.SetArguments(Arguments ?? "");
+      link.SetWorkingDirectory(WorkingDirectory ?? "");
+      link.SetDescription(Description ?? "");
+      if (!String.IsNullOrEmpty(IconLocation)) {
+        int comma = IconLocation.LastIndexOf(','), index;
+        if (comma > 0 && Int32.TryParse(IconLocation.Substring(comma + 1), out index)) link.SetIconLocation(IconLocation.Substring(0, comma), index);
+        else link.SetIconLocation(IconLocation, 0);
+      }
+      ((IPersistFile)link).Save(Destination, true);
+    }
+  }
+}
+'@
+# </unicode-shortcut>
+if ($shell -is [__ComObject]) {
+    if (-not ('QuotaDeck.Shortcut' -as [type])) { Add-Type -TypeDefinition $unicodeShortcutSource -Language CSharp }
+    $shell = [pscustomobject]@{}
+    $shell | Add-Member -MemberType ScriptMethod -Name CreateShortcut -Value { param($destination) [QuotaDeck.Shortcut]::Open($destination) }
+}
 $desktop = [Environment]::GetFolderPath('Desktop')
 $startup = [Environment]::GetFolderPath('Startup')
 
