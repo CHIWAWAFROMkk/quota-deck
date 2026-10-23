@@ -30,9 +30,8 @@ namespace QuotaDeck {
         public static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
         [DllImport("user32.dll")]
         public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool IsZoomed(IntPtr window);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+        public static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -58,8 +57,10 @@ namespace QuotaDeck {
 
         public static bool CoversMonitor(IntPtr window) {
             // A maximised window spills a few pixels past the screen; with an auto-hidden taskbar it would
-            // look fullscreen. Games and fullscreen video are never maximised windows.
-            if (window == IntPtr.Zero || IsZoomed(window)) return false;
+            // look fullscreen. It keeps its title bar, while fullscreen browsers and borderless games drop it
+            // (they may still count as maximised, e.g. Edge going fullscreen from a maximised window).
+            const int WS_CAPTION = 0x00C00000;
+            if (window == IntPtr.Zero || (GetWindowLong(window, -16) & WS_CAPTION) == WS_CAPTION) return false;
             // Keep the window and monitor rectangles in physical pixels on mixed-DPI displays.
             IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
             try {
