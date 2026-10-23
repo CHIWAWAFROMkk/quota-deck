@@ -9,9 +9,10 @@ import trackerModule from '../src/main/session-tracker.cjs';
 
 const realRequire = createRequire(new URL('../src/main/main.cjs', import.meta.url));
 const sessionId = '11111111-2222-3333-4444-555555555555';
-function setup({ failOpen = false } = {}) {
-  let ready, hudOptions, watcherOptions, tracker, detectorOptions;
-  let detectorStarts = 0, detectorStops = 0;
+function setup({ failOpen = false, shortcutFree = true } = {}) {
+  let ready, hudOptions, watcherOptions, tracker, tray;
+  const shortcuts = {};
+  let unregistered = 0, shows = 0;
   const gaming = [];
   let starts = 0, stops = 0;
   const sent = [], opened = [];
@@ -21,16 +22,15 @@ function setup({ failOpen = false } = {}) {
     getPath: () => 'synthetic-user-data', quit() {},
   });
   const icon = { isEmpty: () => false, resize() { return this; } };
-  const hud = { isVisible: () => false, getGames: () => ['custom.exe'], setGaming: value => gaming.push(value), pushSessions: snapshot => sent.push(snapshot), pushState() {}, pushTokens() {}, destroy() {} };
-  class Tray extends EventEmitter { setToolTip() {} setContextMenu() {} }
+  const hud = { isVisible: () => false, show: () => { shows++; }, setGaming: value => gaming.push(value), pushSessions: snapshot => sent.push(snapshot), pushState() {}, pushTokens() {}, destroy() {} };
+  class Tray extends EventEmitter { constructor() { super(); tray = this; this.menus = []; } setToolTip() {} setContextMenu(menu) { this.menus.push(menu); } }
   const modules = {
-    electron: { app, Tray, Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => icon }, shell: { openExternal: async url => { opened.push(url); if (failOpen) throw new Error('synthetic launcher error'); } } },
+    electron: { app, Tray, Menu: { buildFromTemplate: value => value }, globalShortcut: { register: (key, fn) => { if (!shortcutFree) return false; shortcuts[key] = fn; return true; }, unregisterAll: () => { unregistered++; } }, nativeImage: { createFromPath: () => icon }, shell: { openExternal: async url => { opened.push(url); if (failOpen) throw new Error('synthetic launcher error'); } } },
     './snapshot.cjs': { configureHistory() {}, readAll: async () => [] },
     './workbuddy-client.cjs': { WORKBUDDY_APP_URL: 'https://example.test' },
     './claude-statusline-chain.cjs': {}, './local-paths.cjs': {},
     './hud-view.cjs': { buildHudItems: () => [], buildHudTokens: value => value },
     './hud-window.cjs': { createHud: options => { hudOptions = options; return hud; } },
-    './game-detector.cjs': { createGameDetector: options => { detectorOptions = options; return { start: () => { detectorStarts++; }, stop: () => { detectorStops++; } }; } },
     './token-ledger.cjs': { createTokenLedger: () => ({ read: async () => ({}) }) },
     './stats-window.cjs': { createStats: () => ({ open() {}, push() {}, destroy() {} }) },
     './session-tracker.cjs': { createSessionTracker: options => { tracker = trackerModule.createSessionTracker(options); return tracker; } },
@@ -50,7 +50,7 @@ function setup({ failOpen = false } = {}) {
     return `claude:${id}:${at}`;
   }
   return { app, sent, opened, finish, hud: () => hudOptions, watcher: () => watcherOptions, tracker: () => tracker, starts: () => starts, stops: () => stops,
-    detector: () => detectorOptions, detectorStarts: () => detectorStarts, detectorStops: () => detectorStops, gaming };
+    gaming, shortcuts, tray: () => tray, menu: () => tray.menus.at(-1), unregistered: () => unregistered, shows: () => shows };
 }
 
 test('main starts session monitoring independently of HUD visibility and stops on quit', () => {
@@ -98,14 +98,34 @@ test('main preserves an unread reply when launching the session fails', async ()
   } finally { s.app.emit('before-quit'); }
 });
 
-test('main starts the game detector with HUD games, forwards changes and stops on quit', () => {
+test('Ctrl+Alt+H and the tray item toggle game mode, the tray icon leaves it, quitting frees the key', () => {
   const s = setup();
+  const item = () => s.menu().find(entry => entry.label?.startsWith('游戏模式'));
   try {
-    assert.equal(s.detectorStarts(), 1);
-    assert.deepEqual(s.detector().getGames(), ['custom.exe']);
-    s.detector().onChange(true, 'custom.exe');
-    s.detector().onChange(false, null);
+    assert.equal(typeof s.shortcuts['Control+Alt+H'], 'function');
+    assert.equal(item().label, '游戏模式（Ctrl+Alt+H）');
+    assert.equal(item().checked, false);
+    s.shortcuts['Control+Alt+H']();
+    assert.deepEqual(s.gaming, [true]);
+    assert.equal(item().checked, true, 'the tray shows the mode the key turned on');
+    item().click({ checked: false });
     assert.deepEqual(s.gaming, [true, false]);
-  } finally { s.app.emit('before-quit'); }
-  assert.equal(s.detectorStops(), 1);
+    assert.equal(item().checked, false);
+    s.shortcuts['Control+Alt+H']();
+    const shows = s.shows();
+    s.tray().emit('click');
+    assert.deepEqual(s.gaming, [true, false, true, false], 'clicking the tray icon means: show me the HUD');
+    assert.equal(s.shows(), shows + 1);
+  } finally { s.app.emit('before-quit'); s.app.emit('will-quit'); }
+  assert.equal(s.unregistered(), 1);
+});
+
+test('a hotkey taken by another program leaves game mode in the tray only', () => {
+  const s = setup({ shortcutFree: false });
+  try {
+    const item = s.menu().find(entry => entry.label?.startsWith('游戏模式'));
+    assert.equal(item.label, '游戏模式');
+    item.click({ checked: true });
+    assert.deepEqual(s.gaming, [true]);
+  } finally { s.app.emit('before-quit'); s.app.emit('will-quit'); }
 });

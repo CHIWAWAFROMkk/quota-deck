@@ -48,12 +48,12 @@ test('settings are validated and fall back to defaults', () => {
   assert.deepEqual(normalizeHudSettings(null), { ...geometry.DEFAULT_SETTINGS, metrics: {} });
   assert.deepEqual(normalizeHudSettings([1]), { ...geometry.DEFAULT_SETTINGS, metrics: {} });
   assert.deepEqual(normalizeHudSettings({ displayId: 7, edge: 'top', offset: 0.2, visible: false, size: 30, ringWidth: 2.3, showsRings: false, showsNumbers: false, metrics: { claude: 'burn', codex: 'tokens' } }),
-    { displayId: 7, edge: 'top', offset: 0.2, visible: false, style: 'strip', games: geometry.DEFAULT_GAMES, size: 30, ringWidth: 2.5, showsRings: false, showsNumbers: false, metrics: { codex: 'tokens', claude: 'burn' } });
+    { displayId: 7, edge: 'top', offset: 0.2, visible: false, style: 'strip', size: 30, ringWidth: 2.5, showsRings: false, showsNumbers: false, metrics: { codex: 'tokens', claude: 'burn' } });
 });
 
 test('settings with junk values fall back to defaults', () => {
   const junk = normalizeHudSettings({ displayId: 1.5, edge: 'middle', offset: 5, visible: 'yes', size: 'big', ringWidth: 9, showsRings: 'no', showsNumbers: 1, metrics: { codex: 'x', claude: 'tokens', __proto__: { deepseek: 'burn' }, evil: 'burn' } });
-  assert.deepEqual(junk, { displayId: null, edge: 'right', offset: 1, visible: true, style: 'strip', games: geometry.DEFAULT_GAMES, size: 22, ringWidth: 1.5, showsRings: true, showsNumbers: true, metrics: { claude: 'tokens' } });
+  assert.deepEqual(junk, { displayId: null, edge: 'right', offset: 1, visible: true, style: 'strip', size: 22, ringWidth: 1.5, showsRings: true, showsNumbers: true, metrics: { claude: 'tokens' } });
   assert.equal(normalizeHudSettings({ size: 16.5 }).size, 22);
   assert.equal(normalizeHudSettings({ size: 41 }).size, 22);
   assert.deepEqual(normalizeHudSettings({ metrics: ['burn'] }).metrics, {});
@@ -113,21 +113,7 @@ test('style is validated', () => {
   for (const style of [null, '', 'NOTCH', {}, 1]) assert.equal(normalizeHudSettings({ style }).style, 'strip');
 });
 
-test('games list is validated and kept across saves', () => {
-  const defaults = ['cs2.exe', 'tlou-ii.exe', 'tlou-ii-l.exe', 'javaw.exe'];
-  assert.deepEqual(geometry.DEFAULT_GAMES, defaults);
-  for (const games of [undefined, null, {}, 'cs2.exe']) assert.deepEqual(normalizeHudSettings({ games }).games, defaults);
-  const normalized = normalizeHudSettings({ games: ['CS2.EXE', 'bad', 'x.exe', 'x.exe', null, 3, '../evil.exe', 'a'.repeat(61) + '.exe'] });
-  assert.deepEqual(normalized.games, ['cs2.exe', 'x.exe']);
-  assert.deepEqual(normalizeHudSettings(JSON.parse(JSON.stringify(normalized))).games, ['cs2.exe', 'x.exe']);
-  assert.deepEqual(normalizeHudSettings({ games: [] }).games, []);
-  // Any legal file name counts, Chinese and '+' included; path separators and reserved characters do not.
-  assert.deepEqual(normalizeHudSettings({ games: ['原神.exe', 'Notepad++.exe', 'a\\b.exe', 'a:b.exe', 'a*b.exe', 'a\nb.exe', '.exe'] }).games, ['原神.exe', 'notepad++.exe']);
-  assert.equal(normalizeHudSettings({ games: Array.from({ length: 45 }, (_, i) => `game${i}.exe`) }).games.length, 40);
-});
-
 test('isValidSetting accepts only strip or notch for style', () => {
   for (const value of ['strip', 'notch']) assert.equal(geometry.isValidSetting('style', value), true);
   for (const value of [null, '', 'NOTCH', 1, {}]) assert.equal(geometry.isValidSetting('style', value), false);
-  assert.equal(geometry.isValidSetting('games', ['x.exe']), false);
 });
