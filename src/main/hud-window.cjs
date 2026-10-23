@@ -277,7 +277,6 @@ function createHud({ settingsPath, onRefresh, onAction = async () => ({ status: 
 
   return {
     setGaming,
-    getGames: () => [...settings.games],
     isVisible: () => settings.visible,
     show() {
       settings = { ...settings, visible: true };

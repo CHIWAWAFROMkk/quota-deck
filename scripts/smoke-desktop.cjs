@@ -44,18 +44,18 @@ sessionWatcherModule.createSessionWatcher = ({ tracker, onChange }) => {
   sessionFeed = (vendor, events) => { for (const event of events) tracker.ingest(vendor, event); onChange(tracker.snapshot(Date.now())); };
   return { start: async () => {}, stop() {}, tick: async () => {}, rescan: async () => {} };
 };
-// No real PowerShell probe: the smoke decides when a game starts and ends.
-const gameDetectorModule = require(path.join(root, 'src/main/game-detector.cjs'));
-let gameFeed = null;
-gameDetectorModule.createGameDetector = ({ onChange }) => {
-  gameFeed = (gaming, exe = null) => onChange(gaming, gaming ? exe : null);
-  return { start() {}, stop() {} };
-};
 // The tray menu is captured so the smoke can hide and show the HUD the way the user does.
 const { Menu } = require('electron');
 let trayMenu = [];
 const buildMenu = Menu.buildFromTemplate.bind(Menu);
 Menu.buildFromTemplate = template => { if (template.some(item => item.label === '显示 HUD')) trayMenu = template; return buildMenu(template); };
+// Game mode is pressed through the captured Ctrl+Alt+H handler; the smoke never takes the real key.
+const { globalShortcut } = require('electron');
+let gameKey = null;
+globalShortcut.register = (key, fn) => { if (key === 'Control+Alt+H') gameKey = fn; return true; };
+globalShortcut.unregisterAll = () => {};
+const gameItem = () => trayMenu.find(item => item.label?.startsWith('游戏模式'));
+const gameFeed = on => { if (Boolean(gameItem()?.checked) !== on) gameKey(); };
 const { shell } = require('electron');
 const opened = [];
 shell.openPath = async target => { opened.push(target); return ''; };
@@ -513,7 +513,7 @@ app.whenReady().then(async () => {
   assert.deepEqual(await cardUnder(), { gap: 6, centred: true });
   checks.push('notch card: 6px below the block and centred, from a ring and from the wing; the notch holds its shape meanwhile');
   // A game closes the card; when it ends the alerting vendor flashes again.
-  gameFeed(true, 'cs2.exe');
+  gameFeed(true);
   await until(() => hudEval('document.querySelector("#card").hidden'));
   await until(() => !hudWindow.isVisible());
   const gameTurn2 = '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6e';
@@ -552,7 +552,7 @@ app.whenReady().then(async () => {
   await hudEval("hud.setSettings({ style: 'notch' })");
   await until(() => hudEval('!document.querySelector("#notch").hidden'));
   const endpoint = JSON.parse(fs.readFileSync(path.join(output, 'appdata', 'QuotaDeck', 'approval-endpoint.json'), 'utf8'));
-  gameFeed(true, 'deadlock.exe');
+  gameFeed(true);
   await until(() => !hudWindow.isVisible());
   const http = require('node:http');
   const pending = http.request({ host: '127.0.0.1', port: endpoint.port, path: '/approval', method: 'POST', headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' } });
@@ -572,17 +572,18 @@ app.whenReady().then(async () => {
   const showItem = trayMenu.find(item => item.label === '显示 HUD');
   showItem.click({ checked: false });
   await until(() => !hudWindow.isVisible());
-  gameFeed(true, 'cs2.exe');
+  gameFeed(true);
   gameFeed(false);
   await sleep(600);
   assert.equal(hudWindow.isVisible(), false, 'leaving a game does not show a HUD the user hid');
-  gameFeed(true, 'cs2.exe');
+  gameItem().click({ checked: true });
+  assert.equal(gameItem().label, '游戏模式（Ctrl+Alt+H）');
   showItem.click({ checked: true });
   await sleep(300);
   assert.equal(hudWindow.isVisible(), false, 'show during a game waits for the game to end');
   // The main process forgets the clickable areas when a game starts; the page must report them again.
   lastHits = [];
-  gameFeed(false);
+  gameItem().click({ checked: false });
   await until(() => hudWindow.isVisible());
   await until(() => lastHits.some(r => r.width === 200 && r.height === 30));
   checks.push('a HUD hidden from the tray stays hidden across a game; showing it during a game waits for the game to end');

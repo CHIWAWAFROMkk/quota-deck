@@ -6,8 +6,7 @@ const PROVIDERS = ['codex', 'claude', 'antigravity', 'workbuddy', 'deepseek'];
 const METRICS = ['quota', 'burn', 'tokens'];
 // Size 22 with numbers and five items; used until the renderer reports what it measured.
 const DEFAULT_STRIPS = Object.freeze({ vertical: Object.freeze({ width: 92, height: 164 }), horizontal: Object.freeze({ width: 390, height: 30 }) });
-const DEFAULT_GAMES = Object.freeze(['cs2.exe', 'tlou-ii.exe', 'tlou-ii-l.exe', 'javaw.exe']);
-const DEFAULT_SETTINGS = Object.freeze({ displayId: null, edge: 'right', offset: 0.3, visible: true, style: 'strip', games: DEFAULT_GAMES, size: 22, ringWidth: 1.5, showsRings: true, showsNumbers: true, metrics: Object.freeze({}) });
+const DEFAULT_SETTINGS = Object.freeze({ displayId: null, edge: 'right', offset: 0.3, visible: true, style: 'strip', size: 22, ringWidth: 1.5, showsRings: true, showsNumbers: true, metrics: Object.freeze({}) });
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const isVertical = edge => edge === 'left' || edge === 'right';
@@ -23,9 +22,6 @@ function normalizeHudSettings(raw) {
     offset: Number.isFinite(r.offset) ? clamp(r.offset, 0, 1) : DEFAULT_SETTINGS.offset,
     visible: typeof r.visible === 'boolean' ? r.visible : DEFAULT_SETTINGS.visible,
     style: isValidSetting('style', r.style) ? r.style : DEFAULT_SETTINGS.style,
-    games: Array.isArray(r.games)
-      ? [...new Set(r.games.filter(v => typeof v === 'string' && /^[^\\/:*?"<>|\x00-\x1f]{1,60}\.exe$/i.test(v)).map(v => v.toLowerCase()))].slice(0, 40)
-      : [...DEFAULT_GAMES],
     size: Number.isInteger(r.size) && r.size >= 16 && r.size <= 40 ? r.size : DEFAULT_SETTINGS.size,
     ringWidth: Number.isFinite(r.ringWidth) && r.ringWidth >= 1 && r.ringWidth <= 4 ? Math.round(r.ringWidth * 2) / 2 : DEFAULT_SETTINGS.ringWidth,
     showsRings: typeof r.showsRings === 'boolean' ? r.showsRings : DEFAULT_SETTINGS.showsRings,
@@ -125,4 +121,4 @@ function pickDisplay(displays, primary, displayId) {
   return displays.find(display => display.id === displayId) || primary;
 }
 
-module.exports = { DEFAULT_GAMES, DEFAULT_SETTINGS, DEFAULT_STRIPS, EDGES, MARGIN, WINDOW, isValidSetting, layoutHud, layoutNotch, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge };
+module.exports = { DEFAULT_SETTINGS, DEFAULT_STRIPS, EDGES, MARGIN, WINDOW, isValidSetting, layoutHud, layoutNotch, normalizeHits, normalizeHudSettings, normalizeStrips, pickDisplay, pointerOverHits, snapToEdge };

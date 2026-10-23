@@ -1,5 +1,5 @@
 const path = require('node:path');
-const { app, Menu, nativeImage, shell, Tray } = require('electron');
+const { app, globalShortcut, Menu, nativeImage, shell, Tray } = require('electron');
 const { readAll, configureHistory } = require('./snapshot.cjs');
 const { WORKBUDDY_APP_URL } = require('./workbuddy-client.cjs');
 const { connect: connectClaudeStatusLine, disconnect: disconnectClaudeStatusLine } = require('./claude-statusline-chain.cjs');
@@ -8,7 +8,6 @@ const { createApprovalServer } = require('./approval-server.cjs');
 const { nodePath } = require('./local-paths.cjs');
 const { buildHudItems, buildHudTokens } = require('./hud-view.cjs');
 const { createHud } = require('./hud-window.cjs');
-const { createGameDetector } = require('./game-detector.cjs');
 const { createTokenLedger } = require('./token-ledger.cjs');
 const { createStats } = require('./stats-window.cjs');
 const { createSessionTracker } = require('./session-tracker.cjs');
@@ -19,7 +18,10 @@ let tray = null;
 let refreshTimer = null;
 let refreshPending = null;
 let hud = null;
-let gameDetector = null;
+// Game mode is the user's call: Ctrl+Alt+H or the tray hides the whole HUD until it is switched off.
+const GAME_KEY = 'Control+Alt+H';
+let gameMode = false;
+let gameKeyBound = false;
 let tokenLedger = null;
 let stats = null;
 let lastTokens = null;
@@ -101,14 +103,29 @@ function createTray() {
   }
   tray = new Tray(icon.resize({ width: 18, height: 18 }));
   tray.setToolTip('QuotaDeck · AI 额度');
+  updateTrayMenu();
+  // Clicking the icon means "show me the HUD", so it also ends game mode.
+  tray.on('click', () => { setGameMode(false); hud?.show(); });
+}
+
+// Rebuilt on every game mode change so the checkbox follows the hotkey.
+function updateTrayMenu() {
+  if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '显示 HUD', type: 'checkbox', checked: hud?.isVisible() ?? true, click: (item) => { if (item.checked) hud?.show(); else hud?.hide(); } },
+    { label: gameKeyBound ? '游戏模式（Ctrl+Alt+H）' : '游戏模式', type: 'checkbox', checked: gameMode, click: (item) => setGameMode(item.checked) },
     { label: '刷新全部', click: () => { refreshAll().catch(() => {}); } },
     { label: '重新加载界面', click: () => { hud?.reload(); } },
     { type: 'separator' },
     { label: '退出', click: () => { app.isQuiting = true; app.quit(); } },
   ]));
-  tray.on('click', () => { hud?.show(); });
+}
+
+function setGameMode(on) {
+  if (on === gameMode) return;
+  gameMode = on;
+  hud?.setGaming(on);
+  updateTrayMenu();
 }
 
 app.whenReady().then(() => {
@@ -143,8 +160,8 @@ app.whenReady().then(() => {
     },
   });
   hud.pushApprovals?.(approvalConnectionState());
-  gameDetector = createGameDetector({ getGames: () => hud.getGames(), onChange: gaming => hud?.setGaming(gaming) });
-  gameDetector.start();
+  // Another program may own the key already; game mode then stays reachable from the tray.
+  try { gameKeyBound = globalShortcut.register(GAME_KEY, () => setGameMode(!gameMode)); } catch { gameKeyBound = false; }
   sessionWatcher = createSessionWatcher({ tracker: sessionTracker, onChange: snapshot => hud?.pushSessions(snapshot) });
   sessionWatcher.start().catch(() => {});
   createTray();
@@ -152,11 +169,12 @@ app.whenReady().then(() => {
   refreshTimer = setInterval(() => { refreshAll().catch(() => {}); }, 60_000);
 });
 
+app.on('will-quit', () => { globalShortcut.unregisterAll(); });
+
 app.on('before-quit', () => {
   app.isQuiting = true;
   if (refreshTimer) clearInterval(refreshTimer);
   sessionWatcher?.stop();
-  gameDetector?.stop();
   hud?.destroy();
   stats?.destroy();
   const server = approvalServer;

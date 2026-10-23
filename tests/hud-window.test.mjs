@@ -323,18 +323,6 @@ test('dragging is ignored in notch mode', async () => {
   } finally { hud.destroy(); }
 });
 
-test('games cannot be changed through the settings channel', async () => {
-  const { fake, hud, event, file } = await setup();
-  try {
-    const defaults = ['cs2.exe', 'tlou-ii.exe', 'tlou-ii-l.exe', 'javaw.exe'];
-    assert.deepEqual(hud.getGames(), defaults);
-    hud.getGames().push('unwanted.exe');
-    fake.ipc.handle['hud:settings'](event, { games: ['x.exe'], style: 'notch' });
-    assert.deepEqual(hud.getGames(), defaults);
-    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).games, defaults);
-  } finally { hud.destroy(); }
-});
-
 test('gaming hides the HUD and leaving shows it again', async () => {
   const { fake, hud, win, event } = await setup();
   try {
