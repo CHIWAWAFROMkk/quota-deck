@@ -49,7 +49,7 @@ Windows 桌面 AI 额度显示器与本地 Agent 并行任务入口。使用 Ele
   - 前台窗口占满整块屏幕，且程序名在游戏名单里。
 - 浏览器或播放器全屏看视频不算，HUD 照常显示。
 - 游戏中提醒和批准请求照常攒着；退出游戏后约 2 秒 HUD 回来，攒下的提醒照常出现，光晕补闪一次。托盘里手动隐藏的 HUD 不会因为进出游戏自己冒出来。
-- 游戏名单在 `%APPDATA%\QuotaDeck\hud-settings.json` 的 `games` 键里，是一组 exe 文件名，不区分大小写。默认包括 `cs2.exe`（完美世界 CS2）、`tlou-ii.exe` / `tlou-ii-l.exe`（最后生还者 2）和 `javaw.exe`（Minecraft，只有占满全屏时才算）。先从托盘退出 QuotaDeck 再改（运行中保存设置会覆盖手改的内容），改完启动生效；写错的项会被忽略。
+- 游戏名单在 `%APPDATA%\quota-deck\hud-settings.json` 的 `games` 键里，是一组 exe 文件名，不区分大小写。默认包括 `cs2.exe`（完美世界 CS2）、`tlou-ii.exe` / `tlou-ii-l.exe`（最后生还者 2）和 `javaw.exe`（Minecraft，只有占满全屏时才算）。先从托盘退出 QuotaDeck 再改（运行中保存设置会覆盖手改的内容），改完启动生效；写错的项会被忽略。
 - 检测用一个后台 PowerShell 小进程，每 1.5 秒看一次前台程序名、路径和是否占满屏幕，不读窗口标题。它起不来时就当作没在打游戏。
 
 ## 运行
